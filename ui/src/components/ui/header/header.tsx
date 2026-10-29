@@ -36,12 +36,12 @@ export const Header = () => {
   const onLogout = () => {
     if (authUrl?.includes('openid')) {
       setIsConfirmationOpen(true)
+
+      return
     }
 
-    if (!authUrl?.includes('openid')) {
-      authStore.logout()
-      window.location.assign(getAuthRoute())
-    }
+    authStore.logout()
+    window.location.assign(getAuthRoute())
   }
 
   return (
