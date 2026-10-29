@@ -219,7 +219,7 @@ stf local --need-scrcpy
 ```
 
 - The browser decodes the stream with WebCodecs: a recent Chrome, Edge, Safari or Firefox, over HTTPS (or `localhost`).
-- `--scrcpy-bit-rate` sets the video bit rate (default 4 Mbit/s); `--screen-frame-rate` caps the frame rate.
+- `--scrcpy-bit-rate` sets the video bit rate at quality 80, the top of the quality slider (default 4 Mbit/s); lower qualities scale it down, and changing the quality restarts the stream. `--screen-frame-rate` caps the frame rate.
 - The Docker image ships the scrcpy server. Elsewhere, download it once with `node scripts/fetch-scrcpy-server.mjs`, which checks its SHA-256. Without it, or when scrcpy cannot start on a device, the device falls back to minicap.
 
 ## Testing
