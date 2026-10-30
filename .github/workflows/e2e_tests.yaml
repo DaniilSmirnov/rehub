@@ -65,6 +65,15 @@ jobs:
         continue-on-error: true
         run: docker compose -f docker-compose-e2e-tests.yaml logs devicehub-e2e-tests
 
+      - name: Show Playwright error context
+        if: failure()
+        continue-on-error: true
+        run: |
+          for f in test/e2e/test-results/*/error-context.md; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"; cat "$f"; echo "::endgroup::"
+          done
+
       - name: Upload Playwright results
         if: failure()
         uses: actions/upload-artifact@v4
