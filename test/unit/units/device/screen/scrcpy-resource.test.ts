@@ -77,5 +77,5 @@ describe('scrcpy resource', () => {
         const {adb} = fakeAdb(Infinity)
         const resource = await scrcpy.invoke({serial: 'serial'}, adb)
         await expect(resource.start({maxSize: 1280, maxFps: 30, bitRate: 4000000}, () => {})).rejects.toThrow('closed')
-    })
+    }, 15000) // retries for 10 s before giving up
 })

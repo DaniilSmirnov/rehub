@@ -68,6 +68,8 @@ services:
       - MONGODB_PORT_27017_TCP=mongodb://mongo1:27017
       - STF_ADMIN_EMAIL=administrator@fakedomain.com
       - STF_ADMIN_NAME=administrator
+      # Stream screens with scrcpy (H.264): test/e2e/tests/device-stream.spec.ts checks it
+      - DH_NEED_SCRCPY=true
     command: stf local --adb-host emulator --public-ip localhost --provider-min-port 7400 --provider-max-port 7500
     healthcheck:
       test: ["CMD", "curl", "-f", "http://devicehub:7100/auth/contact"]
