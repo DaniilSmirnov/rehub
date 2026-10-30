@@ -50,20 +50,29 @@ jobs:
             --abort-on-container-exit \
             devicehub-e2e-tests
 
-      - name: Show logs for devicehub
-        if: always()
-        continue-on-error: true
-        run: docker compose -f docker-compose-e2e-tests.yaml logs devicehub
-
       - name: Show logs for emulator
         if: always()
         continue-on-error: true
-        run: docker compose -f docker-compose-e2e-tests.yaml logs emulator
+        run: docker compose -f docker-compose-e2e-tests.yaml logs --tail 300 emulator
 
       - name: Show logs for E2E tests
         if: always()
         continue-on-error: true
         run: docker compose -f docker-compose-e2e-tests.yaml logs devicehub-e2e-tests
+
+      - name: Show Playwright error context
+        if: failure()
+        continue-on-error: true
+        run: |
+          for f in test/e2e/test-results/*/error-context.md; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"; cat "$f"; echo "::endgroup::"
+          done
+
+      - name: Show logs for devicehub
+        if: always()
+        continue-on-error: true
+        run: docker compose -f docker-compose-e2e-tests.yaml logs --tail 3000 devicehub
 
       - name: Upload Playwright results
         if: failure()
