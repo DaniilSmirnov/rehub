@@ -68,11 +68,6 @@ jobs:
             [ -f "$f" ] || continue
             echo "::group::$f"; cat "$f"; echo "::endgroup::"
           done
-          # TEMP debug: dump failure screenshots
-          for f in test/e2e/test-results/*/test-failed-*.png; do
-            [ -f "$f" ] || continue
-            echo "SCREENSHOT $f $(base64 -w0 "$f")"
-          done
 
       - name: Show logs for devicehub
         if: always()
