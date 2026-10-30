@@ -24,8 +24,10 @@ const fakeAdb = (refusals: number) => {
     const device = {
         push: async(_src: string, dest: string) => {
             calls.push.push(dest)
-            const transfer = new EventEmitter()
-            setImmediate(() => transfer.emit('end'))
+            // Like @u4/adbkit: push() resolves once the transfer has already ended,
+            // so a listener for 'end' attached afterwards never fires
+            const transfer = Object.assign(new EventEmitter(), {waitForEnd: async() => {}})
+            transfer.emit('end')
             return transfer
         },
         shell: async(cmd: string) => {
