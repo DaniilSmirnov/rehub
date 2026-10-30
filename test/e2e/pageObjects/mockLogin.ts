@@ -12,7 +12,7 @@ export class DeviceHubMockLoginPage {
         this.page = page;
         this.loginInput = page.getByPlaceholder('Please enter your name');
         this.emailInput = page.getByPlaceholder('Please enter your email');
-        this.devicehubLogo = page.getByTitle('DeviceHub');
+        this.devicehubLogo = page.getByTitle('reHub');
         this.loginButton = page.locator('#loginButton');
         this.contactButton = page.locator('#contactButton');
     }
