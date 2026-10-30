@@ -58,7 +58,7 @@ jobs:
       - name: Show logs for emulator
         if: always()
         continue-on-error: true
-        run: docker compose -f docker-compose-e2e-tests.yaml logs emulator
+        run: docker compose -f docker-compose-e2e-tests.yaml logs --tail 300 emulator
 
       - name: Show logs for E2E tests
         if: always()
@@ -72,6 +72,11 @@ jobs:
           for f in test/e2e/test-results/*/error-context.md; do
             [ -f "$f" ] || continue
             echo "::group::$f"; cat "$f"; echo "::endgroup::"
+          done
+          # TEMP debug: dump failure screenshots
+          for f in test/e2e/test-results/*/test-failed-*.png; do
+            [ -f "$f" ] || continue
+            echo "SCREENSHOT $f $(base64 -w0 "$f")"
           done
 
       - name: Upload Playwright results
