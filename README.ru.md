@@ -94,6 +94,9 @@ VK DeviceHub - это форк проекта DeviceFarmer/stf, разработ
 
 Мы приветствуем вклад в дальнейшее повышение безопасности проекта.
 
+### Внутренняя шина сообщений
+Юниты общаются через ZeroMQ (ROUTER прокси на 7110, ROUTER процессора на 7160). Задайте одинаковую переменную окружения `ZMQ_SECRET` всем юнитам, включая провайдеры на других хостах, чтобы включить CURVE: трафик шифруется, и подключиться могут только юниты, знающие секрет. Без неё любой, кто достучится до этих портов, может отправлять команды устройствам, поэтому не открывайте их в недоверенные сети. Для docker-compose раскомментируйте `ZMQ_SECRET` в [scripts/variables.env](scripts/variables.env) и задайте своё значение.
+
 ## Building
 
 Once you have installed all the requirements, you can proceed to fetch the remaining dependencies.
@@ -216,7 +219,8 @@ You may also want to remove our support binaries, although they won't run unless
 adb shell rm /data/local/tmp/minicap \
   /data/local/tmp/minicap.so \
   /data/local/tmp/minitouch \
-  /data/local/tmp/minirev
+  /data/local/tmp/minirev \
+  '/data/local/tmp/devicehub-scrcpy-server-*.jar'
 ```
 
 Your device is now clean.
@@ -224,11 +228,15 @@ Your device is now clean.
 
 ### Scrcpy
 
-If you want use scrcpy instead minicap run app with next command(Scrcpy functionality is in unstable state yet):
+With `--need-scrcpy` (on `stf provider`, `stf device` or `stf local`) Android screens are streamed as H.264 by [scrcpy](https://github.com/Genymobile/scrcpy) instead of JPEG frames by minicap: the same picture takes less bandwidth, and the device encodes it in hardware. Input still goes through minitouch and STFService.
 
 ```bash
-stf local --need-scrcpy true
+stf local --need-scrcpy
 ```
+
+- The browser decodes the stream with WebCodecs: a recent Chrome, Edge, Safari or Firefox, over HTTPS (or `localhost`).
+- `--scrcpy-bit-rate` sets the video bit rate at quality 80, the top of the quality slider (default 4 Mbit/s); lower qualities scale it down, and changing the quality restarts the stream. `--screen-frame-rate` caps the frame rate.
+- The Docker image ships the scrcpy server. Elsewhere, download it once with `node scripts/fetch-scrcpy-server.mjs`, which checks its SHA-256. Without it, or when scrcpy cannot start on a device, the device falls back to minicap.
 
 ## Testing
 

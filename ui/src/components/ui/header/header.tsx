@@ -80,7 +80,7 @@ export const Header = () => {
           size='m'
           target='_blank'
         >
-          {t('DeviceHub Support')}
+          {t('reHub Support')}
         </Button>
         <Button
           before={<Icon16HelpOutline />}
