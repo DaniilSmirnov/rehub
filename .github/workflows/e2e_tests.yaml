@@ -50,11 +50,6 @@ jobs:
             --abort-on-container-exit \
             devicehub-e2e-tests
 
-      - name: Show logs for devicehub
-        if: always()
-        continue-on-error: true
-        run: docker compose -f docker-compose-e2e-tests.yaml logs devicehub
-
       - name: Show logs for emulator
         if: always()
         continue-on-error: true
@@ -78,6 +73,11 @@ jobs:
             [ -f "$f" ] || continue
             echo "SCREENSHOT $f $(base64 -w0 "$f")"
           done
+
+      - name: Show logs for devicehub
+        if: always()
+        continue-on-error: true
+        run: docker compose -f docker-compose-e2e-tests.yaml logs --tail 3000 devicehub
 
       - name: Upload Playwright results
         if: failure()
