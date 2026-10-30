@@ -5,12 +5,14 @@ import { countCanvasColors } from '../helpers/utils/canvas'
 import { nalUnitTypes, ScreenStreamRecorder } from '../helpers/utils/screenStream'
 
 // devicehub runs with --need-scrcpy (DH_NEED_SCRCPY in docker-compose-e2e-tests.yaml):
-// these tests check the screen comes as an H.264 stream and not as minicap JPEG frames
+// these tests check the screen comes as an H.264 stream and not as minicap JPEG frames.
+// Files run in name order and main.spec.ts removes every device: this one runs before it
 const deviceSerial = 'emulator-5554'
 // Starting the scrcpy server on a software emulator takes a few seconds
 const streamTimeout = 60_000
 
 test.describe('scrcpy H.264 screen stream', () => {
+    test.describe.configure({ timeout: 180_000 })
 
     test.afterEach('Free device after test (via api)', async() => {
         await freeDevice(deviceSerial)
