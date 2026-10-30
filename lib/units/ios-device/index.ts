@@ -23,6 +23,7 @@ import {DeviceAbsentMessage, DeviceStatus, DeviceStatusMessage, DeviceIosIntrodu
 import wireutil from "../../wire/util.js"
 import {WebDriverAgent} from "appium-webdriveragent"
 import { openPort } from "./redirect-ports.js"
+import {mountDeveloperImage, startWdaRunner, type IosBackend, type WdaRunner} from './support/go-ios.js'
 
 interface Options {
     silent?: boolean
@@ -56,9 +57,15 @@ interface Options {
     secret: string
     connectPort: number
     disableLogsOverWire: boolean
+    // xcode (macOS: Xcode + idb) or go-ios (experimental, Linux)
+    iosBackend?: IosBackend
+    goIosPath?: string
+    wdaTestRunnerBundleId?: string
+    wdaXctestConfig?: string
 }
 
 export default (async(options: Options) => {
+    const log = logger.createLogger('ios-device:launch')
     const [stopWDAPortForwarding, stopMJPEGPortForwarding] = options.isSimulator
         ? [async() => {}, async() => {}]
         : await Promise.all([
@@ -74,7 +81,11 @@ export default (async(options: Options) => {
         ])
     }
 
-    const WDA = new WebDriverAgent({
+    const goIos = options.iosBackend === 'go-ios' && !options.isSimulator
+    const goIosOptions = {...options, goIosPath: options.goIosPath || 'ios'}
+    let wdaRunner: WdaRunner | null = null
+
+    const WDA = goIos ? null : new WebDriverAgent({
         device: {udid: options.serial},
         realDevice: !options.isSimulator,
         wdaRemotePort: options.wdaPort,
@@ -90,8 +101,13 @@ export default (async(options: Options) => {
         updatedWDABundleId: options.wdaBundleId
     })
 
+    const quitWDA = async() => {
+        await WDA?.quit()
+        await wdaRunner?.stop()
+    }
+
     lifecycle.observe(async() => {
-        await WDA.quit()
+        await quitWDA()
         await stopPortForwarding()
     })
 
@@ -115,12 +131,23 @@ export default (async(options: Options) => {
 
     try {
         // A cached runner may still expose public HTTP/MJPEG listeners.
-        if (!options.silent) await WDA.setupCaching()
-        await WDA.launch(options.provider)
+        if (WDA) {
+            if (!options.silent) await WDA.setupCaching()
+            await WDA.launch(options.provider)
+        }
+        else {
+            await mountDeveloperImage(goIosOptions).catch((err: Error) =>
+                log.warn('Developer image not mounted, WDA may fail to start: %s', err.message))
+            wdaRunner = startWdaRunner(goIosOptions)
+            wdaRunner.process.stderr?.on('data', (data: Buffer) => log.info('runwda: %s', data.toString().trim()))
+            wdaRunner.process.once('exit', (code) => {
+                if (!lifecycle.ending) lifecycle.fatal(new Error(`go-ios runwda exited with code ${code}`))
+            })
+        }
         await new Promise(r => setTimeout(r, 5000))
         await waitWDA()
     } catch (e: any) {
-        await WDA.quit()
+        await quitWDA()
         await stopPortForwarding()
 
         lifecycle.fatal(e)

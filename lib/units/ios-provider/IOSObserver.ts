@@ -1,6 +1,7 @@
 import EventEmitter from 'node:events'
 import {spawn} from 'child_process'
 import usb from 'usb-hotplug'
+import {listDevicesArgs, parseDeviceList, runGoIos} from '../ios-device/support/go-ios.js'
 
 type IsSimulator = boolean
 
@@ -16,8 +17,30 @@ export default class IOSObserver extends EventEmitter<IOSSimEvents> {
     private usbListenerStarted = false
     listnerInterval: NodeJS.Timeout | undefined
 
-    constructor() {
+    private goIosDevices = new Set<string>()
+
+    // With goIosPath, real iPhones are found with `ios list` (usbmuxd) instead of USB hotplug, which
+    // does not see them on Linux, and simulators (macOS only) are not looked for
+    constructor(private readonly goIosPath?: string) {
         super()
+    }
+
+    async processGoIosDevices(): Promise<void> {
+        const devices = parseDeviceList(await runGoIos(this.goIosPath!, listDevicesArgs(), 15_000))
+
+        for (const udid of Array.from(this.goIosDevices)) {
+            if (!devices.includes(udid)) {
+                this.goIosDevices.delete(udid)
+                this.emit('detached', udid, false)
+            }
+        }
+
+        for (const udid of devices) {
+            if (!this.goIosDevices.has(udid)) {
+                this.goIosDevices.add(udid)
+                this.emit('attached', udid, false)
+            }
+        }
     }
 
     getXCRunSimctlDevices = (): Promise<string[]> =>
@@ -83,6 +106,14 @@ export default class IOSObserver extends EventEmitter<IOSSimEvents> {
 
     listen = (): void => {
         new Promise(async() => {
+            if (this.goIosPath) {
+                await this.processGoIosDevices().catch(() => {
+                    // usbmuxd or go-ios is not available yet; try again on the next round
+                })
+                this.listnerInterval = setTimeout(this.listen, 2_000)
+                return
+            }
+
             if (!this.usbListenerStarted) {
                 const currentDevices = usb.listDevices()
                 for (const device of currentDevices) {
