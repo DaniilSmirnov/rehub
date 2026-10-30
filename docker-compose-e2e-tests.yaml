@@ -35,12 +35,16 @@ services:
     command: >
       bash -c "
         adb -a start-server & \
-        emulator -avd test_avd -read-only -no-accel -delay-adb -no-boot-anim -skip-adb-auth -no-window -no-audio -no-qt -no-snapshot -verbose -logcat '*:v'
+        emulator -avd test_avd -read-only -accel auto -gpu swiftshader_indirect -delay-adb -no-boot-anim -skip-adb-auth -no-window -no-audio -no-qt -no-snapshot -verbose -logcat '*:v'
       "
+    # Healthy only once Android has fully booted: devicehub must not pick up
+    # a half-booted (offline) emulator. Without KVM the boot takes minutes.
     healthcheck:
-      test: [ "CMD-SHELL", "adb devices | grep emulator || exit 1" ]
+      test: [ "CMD-SHELL", "adb -s emulator-5554 shell getprop sys.boot_completed | grep -q 1" ]
+      start_period: 15m
+      start_interval: 10s
       interval: 15s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     networks:
       devicehub:
@@ -80,8 +84,10 @@ services:
     depends_on:
       devicehub:
         condition: service_healthy
-    command: sleep 30 && npx playwright test
+    command: ["bash", "-c", "sleep 30 && npx playwright test"]
     environment:
       - CI=1
+    volumes:
+      - ./test/e2e/test-results:/tests/test-results
     restart: "no"
     network_mode: host
