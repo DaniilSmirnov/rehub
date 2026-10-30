@@ -243,3 +243,7 @@ To contribute, please read the guidelines outlined in [CONTRIBUTING.md](CONTRIBU
 For licensing information, please see [LICENSE](LICENSE).
 
 Copyright © 2024 V Kontakte LLC. All Rights Reserved.
+
+---
+
+> \* Этот проект является форком [DeviceFarmer/stf](https://github.com/DeviceFarmer/stf) — оригинального проекта, на основе которого создан DeviceHub.

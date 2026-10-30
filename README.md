@@ -234,3 +234,7 @@ If you still have questions try to [![Ask DeepWiki](https://deepwiki.com/badge.s
 For licensing information, please see [LICENSE](LICENSE).
 
 Copyright © 2024 V Kontakte LLC. All Rights Reserved.
+
+---
+
+> \* This project is a fork of the original [DeviceFarmer/stf](https://github.com/DeviceFarmer/stf) project.
