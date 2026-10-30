@@ -1,5 +1,5 @@
 # Добро пожаловать в репозиторий VK DeviceHub!
-<img src="doc/logo.svg" style="width:300px;height:100px;" alt="VK Devicehub">
+<img src="doc/rehub-logo.svg" style="width:300px;height:100px;" alt="rehub">
 
 ## О проекте
 

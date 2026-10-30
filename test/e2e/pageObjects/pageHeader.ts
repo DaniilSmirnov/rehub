@@ -14,10 +14,10 @@ export class PageHeader {
     constructor(page: Page) {
         this.page = page
         this.baseHeader = page.locator('#mainPageHeader')
-        this.deviceHubLogo = page.getByTitle('DeviceHub')
+        this.deviceHubLogo = page.getByTitle('reHub')
         this.openDevicesListButton = page.getByRole('button', { name: 'Devices', exact: true })
         this.openSettingsButton = page.getByText('Settings')
-        this.ContactSupportButton = page.getByText('DeviceHub Support')
+        this.ContactSupportButton = page.getByText('reHub Support')
         this.HelpButton = page.getByText('Help')
         this.LogoutButton = page.getByText('Logout')
     }
