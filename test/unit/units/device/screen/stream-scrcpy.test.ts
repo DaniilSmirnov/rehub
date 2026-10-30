@@ -29,7 +29,7 @@ const setup = async(start: (config: any) => Promise<any>) => {
     const producer = await stream.invoke(
         {serial: 'serial', screenGrabber: 'minicap-apk', screenFrameRate: 20, screenJpegQuality: 80,
             needScrcpy: true, scrcpyBitRate: 4_000_000},
-        {}, router, minicap, scrcpy, display, {publicPort: 0}, {}
+        {}, router, minicap, scrcpy, display, {publicPort: 0}, new EventEmitter()
     )
     const changeQuality = (quality: number) => handlers.get(ChangeQualityMessage)!('channel', {quality})
     return {producer, scrcpy, minicap, changeQuality}

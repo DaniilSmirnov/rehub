@@ -9,7 +9,7 @@ import { ConditionalRender } from '@/components/lib/conditional-render'
 import { DeviceState } from '@/types/enums/device-state.enum'
 import { CONTAINER_IDS } from '@/config/inversify/container-ids'
 
-import { getControlRoute } from '@/constants/route-paths'
+import { getControlRoute, getWatchRoute } from '@/constants/route-paths'
 
 import type { ListDevice } from '@/types/list-device.type'
 
@@ -60,6 +60,13 @@ export const DeviceStatusCell = memo(({ serial, deviceState }: DeviceStatusCellP
         <Button appearance='neutral' mode='outline' title={deviceState} disabled>
           {t('Busy')}
         </Button>
+      </ConditionalRender>
+      <ConditionalRender conditions={[deviceState === DeviceState.AUTOMATED]}>
+        <Link to={getWatchRoute(serial)}>
+          <Button appearance='neutral' mode='outline' title={deviceState}>
+            {t('Watch')}
+          </Button>
+        </Link>
       </ConditionalRender>
       <ConditionalRender conditions={[deviceState === DeviceState.AUTOMATION]}>
         <Button appearance='positive' mode='outline' title={deviceState} onClick={onStopUsing}>
