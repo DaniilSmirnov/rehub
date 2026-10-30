@@ -1,8 +1,8 @@
 <svg width="489" height="155" viewBox="0 0 489 155" fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect width="489" height="155" rx="17.66" fill="white" />
-    <rect x="24" y="24" width="107" height="107" rx="20" fill="#0077FF" />
+    <rect x="24" y="24" width="107" height="107" rx="20" fill="#FF8C00" />
     <rect x="50" y="42" width="55" height="71" rx="8" fill="white" />
-    <rect x="58" y="52" width="39" height="46" rx="3" fill="#0077FF" />
+    <rect x="58" y="52" width="39" height="46" rx="3" fill="#FF8C00" />
     <circle cx="77.5" cy="105" r="3" fill="white" />
-    <text x="152" y="95" font-family="Helvetica, Arial, sans-serif" font-size="64" font-weight="700" fill="#1A1A1A">rehub</text>
+    <text x="152" y="95" font-family="Helvetica, Arial, sans-serif" font-size="64" font-weight="700" fill="#1A1A1A">reHub</text>
 </svg>
