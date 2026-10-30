@@ -1,13 +1,15 @@
-# Welcome to VK DeviceHub!
-<img src="https://raw.githubusercontent.com/VKCOM/devicehub/refs/heads/master/doc/logo.svg" style="width:300px;height:100px;" alt="VK Devicehub">
+# Welcome to rehub!
+<img src="./doc/rehub-logo.svg" style="width:300px;height:100px;" alt="rehub">
 
 ## About Project
 
-VK DeviceHub is a fork of the DeviceFarmer/stf project developed by members of VK Company.
+rehub is a fork of [VK DeviceHub](https://github.com/VKCOM/devicehub), which itself is a fork of the DeviceFarmer/stf project developed by members of VK Company.
+
+rehub is maintained by Daniil, one of the original authors of DeviceHub.
 
 If you have ideas, suggestions, or would like to participate in development, we welcome you to join our development chat ([link](https://vk.me/join/QCCJfaPu544UDzXgQrXe1jNVMyVEdh9bFZg=)).
 
-You can watch a presentation about our product at the Heisenbug 2024 conference by following this link:
+You can watch a presentation about the original project at the Heisenbug 2024 conference by following this link:
 [Presentation at Heisenbug 2024 conference](https://heisenbug.ru/talks/cee3ec59796e43f6a3d4ae508db157d3/?referer=/schedule/days/)
 <img src="https://raw.githubusercontent.com/VKCOM/devicehub/refs/heads/master/doc/showcase.png" alt="VK Devicehub">
 
