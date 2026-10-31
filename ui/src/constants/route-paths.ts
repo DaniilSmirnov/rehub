@@ -4,6 +4,7 @@ export const getControlRoute = (serial: string, provider?: string) =>
   provider === undefined
     ? `/control/${serial}`
     : `/silent-control/${encodeURIComponent(provider)}/${encodeURIComponent(serial)}`
+export const getWatchRoute = (serial: string) => `/watch/${serial}`
 export const getControlLogsRoute = (serial: string, provider?: string) => `${getControlRoute(serial, provider)}/logs`
 export const getControlAdvancedRoute = (serial: string, provider?: string) =>
   `${getControlRoute(serial, provider)}/advanced`

@@ -8,6 +8,7 @@ import {Any} from '../../../wire/google/protobuf/any.js'
 import auth from '../middleware/auth.js'
 import UserModel from '../../../db/models/user/index.js'
 import {registerDeviceCommands, type DeviceCommands} from './device-command-handlers.js'
+import {ownerAdbKeys} from '../../../util/adbkeyutil.js'
 import {
     Envelope,
     DescribeSilentDevice,
@@ -46,7 +47,7 @@ export function registerSilentNamespace(
 
         try {
             const result = await txmanager.runTransaction(provider, serial, DescribeSilentDevice, {
-                actor: {email: user.email, name: user.name, group: user.group, adbKeys: []}
+                actor: {email: user.email, name: user.name, group: user.group, adbKeys: [], adbPublicKeys: []}
             }, {timeout: 10_000})
 
             socket.data.device = result.body.device
@@ -138,7 +139,8 @@ export function registerSilentNamespace(
                         email: user.email,
                         name: user.name,
                         group: user.group,
-                        adbKeys: keys.map((key: any) => key.fingerprint)
+                        adbKeys: keys.map((key: any) => key.fingerprint),
+                        adbPublicKeys: ownerAdbKeys(keys).publicKeys
                     }
                 }, {timeout: 60_000})
 

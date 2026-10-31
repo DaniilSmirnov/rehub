@@ -7,6 +7,7 @@ export const isDeviceInactive = (state: DeviceState): boolean => {
     state === DeviceState.UNAUTHORIZED ||
     state === DeviceState.PREPARING ||
     state === DeviceState.BUSY ||
+    state === DeviceState.AUTOMATED ||
     state === DeviceState.UNHEALTHY
   ) {
     return true

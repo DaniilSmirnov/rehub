@@ -2948,6 +2948,53 @@ paths:
               schema:
                 $ref: '#/components/schemas/UnexpectedErrorResponse'
     x-swagger-router-controller: devices
+  /devices/{serial}/watch:
+    get:
+      tags:
+        - devices
+      summary: Gets a token for watching a device under automation
+      description: >
+        Returns a short-lived token that opens the device's screen stream read-only. Only for a
+        device reserved with usage "automation" in a group you can access. Pass it to the screen
+        WebSocket in place of your session token (subprotocol `access_token.<token>`); the stream
+        closes with code 1008 when the automation lease ends. Viewers cannot send input.
+      operationId: getDeviceWatchToken
+      parameters:
+        - name: serial
+          in: path
+          description: Device identifier (serial)
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Watch token
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - token
+                properties:
+                  success:
+                    type: boolean
+                  description:
+                    type: string
+                  token:
+                    type: string
+        default:
+          description: |
+            Unexpected Error:
+              * 401: Unauthorized => bad credentials
+              * 403: Forbidden => device is not under automation
+              * 404: Not Found => unknown device
+              * 500: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnexpectedErrorResponse'
+    x-swagger-router-controller: devices
   /devices/{serial}/owner:
     get:
       tags:
@@ -3474,6 +3521,33 @@ paths:
                 $ref: '#/components/schemas/UnexpectedErrorResponse'
       x-codegen-request-body-name: serial
     x-swagger-router-controller: autotests
+  /metrics:
+    get:
+      tags:
+        - admin
+        - metrics
+      summary: Gets Prometheus metrics
+      description: Device, provider, user and group counts plus process metrics, in the
+        Prometheus text format. Reserved to administrators.
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Metrics in the Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: |
+            Unexpected Error:
+              * 401: Unauthorized => bad credentials
+              * 403: Forbidden => not an administrator
+              * 500: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnexpectedErrorResponse'
+    x-swagger-router-controller: metrics
   /stats:
     post:
       tags:

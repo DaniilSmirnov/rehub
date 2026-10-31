@@ -33,7 +33,7 @@ export const getDeviceState = (data: Device): DeviceState => {
   const isDeviceUsedByMistake = !deviceUsable || !data.owner
 
   if (data.status === 3 && data.ready && (!data.using || isDeviceUsedByMistake) && data.owner) {
-    return DeviceState.BUSY
+    return data.usage === 'automation' ? DeviceState.AUTOMATED : DeviceState.BUSY
   }
 
   if (

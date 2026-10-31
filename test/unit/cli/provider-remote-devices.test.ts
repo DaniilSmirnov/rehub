@@ -111,3 +111,24 @@ describe('provider CLI: worker flags', () => {
         expect((await workerOptions(await startProvider(['--lock-rotation']))).lockRotation).toBe(true)
     })
 })
+
+describe('provider CLI: cleanup folders', () => {
+    it('cleans no folder by default', async() => {
+        const worker = await workerOptions(await startProvider())
+        expect(worker.cleanupFolder).toEqual([])
+    })
+
+    it('passes the cleanup folders on to the device worker', async() => {
+        const options = await startProvider(['--cleanup-folder', '/sdcard/Download', '/data/local/tmp'])
+        const worker = await workerOptions(options)
+        expect(worker.cleanupFolder).toEqual(['/sdcard/Download', '/data/local/tmp'])
+    })
+
+    // The local command puts the serials right after "provider" for this reason
+    it('keeps serials given before the cleanup folders', async() => {
+        const options = await startProvider(['serial-1', '--cleanup-folder', '/sdcard/Download'])
+        expect(options.filter).toBeTypeOf('function')
+        expect(options.filter('serial-1')).toBe(true)
+        expect(options.filter('serial-2')).toBe(false)
+    })
+})

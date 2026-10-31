@@ -12,6 +12,7 @@ import transport from '../../../base-device/support/transport.js'
 import group from '../../../base-device/plugins/group.js'
 import {NoGroupError} from '../../../../util/grouputil.js'
 import {decode} from '../../../../util/jwtutil.js'
+import {screenRole} from '../../../../util/watchutil.js'
 export default syrup.serial()
     .dependency(solo)
     .dependency(wdaClient)
@@ -20,6 +21,14 @@ export default syrup.serial()
     .define(function(options, solo, WdaClient, transport, group) {
         const log = logger.createLogger('device:plugins:screen:stream')
         const wss = new webSocketServer.Server({port: options.screenPort})
+        // Viewers watch one automation lease; any change of owner ends it for them
+        const watchers = new Set()
+        const endWatching = () => {
+            for (const client of watchers) client.close(1008, 'Automation finished')
+            watchers.clear()
+        }
+        group.on('join', endWatching)
+        group.on('leave', endWatching)
         if (options.silent) group.on('leave', () => {
             for (const client of wss.clients) client.close(1008, 'Device session ended')
         })
@@ -45,8 +54,9 @@ export default syrup.serial()
                 try {
                     await new Promise(r => setTimeout(r, 200))
 
-                    const deviceGroup = await group.get()
-                    if (deviceGroup.email !== user?.email) {
+                    await group.get()
+                    const role = screenRole(user, options.serial, group.lease())
+                    if (!role) {
                         const err = 'Device used by another user'
                         log.warn('WebSocket authentication failed for device %s: $s', options.serial, err)
                         ws.send(JSON.stringify({
@@ -58,7 +68,11 @@ export default syrup.serial()
                     }
 
                     authed = true
-                    log.info('WebSocket authenticated for device %s', options.serial)
+                    if (role === 'watcher') {
+                        watchers.add(ws)
+                        ws.on('close', () => watchers.delete(ws))
+                    }
+                    log.info('WebSocket authenticated for device %s as %s', options.serial, role)
 
                     // Send success message
                     ws.send(JSON.stringify({

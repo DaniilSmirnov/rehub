@@ -7,7 +7,7 @@ import type {SilentDeviceState} from '../../../wire/silent-device-state.js'
 import * as wire from '../../../wire/wire.js'
 
 export interface SilentGroup {
-    joinExclusive(owner: {email: string; name: string; group: string}, keys: string[], timeout: number): Promise<unknown>
+    joinExclusive(owner: {email: string; name: string; group: string}, keys: string[], timeout: number, publicKeys?: string[]): Promise<unknown>
     leaveExclusive(reason: string): Promise<unknown>
 }
 
@@ -132,7 +132,7 @@ export class SilentDeviceRuntime {
 
     private async acquireLease(actor: wire.SilentActor, group: SilentGroup): Promise<void> {
         try {
-            await group.joinExclusive({email: actor.email, name: actor.name, group: actor.group}, actor.adbKeys, this.timeout)
+            await group.joinExclusive({email: actor.email, name: actor.name, group: actor.group}, actor.adbKeys, this.timeout, actor.adbPublicKeys)
             this.leaseId = randomUUID()
             this.phase = 'owned'
             this.state.owner = {email: actor.email, name: actor.name, group: actor.group}

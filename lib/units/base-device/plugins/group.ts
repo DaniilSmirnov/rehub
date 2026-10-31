@@ -23,6 +23,8 @@ interface OwnerState {
 interface JoinEvent {
     owner: OwnerState
     adbKeys: ADBKey[]
+    // The full keys stored for some of adbKeys, in the ~/.android/adbkey.pub format
+    adbPublicKeys: string[]
     timeout: number
     usage: string
 }
@@ -40,6 +42,7 @@ interface GroupEvents {
 
 export class GroupManager extends EventEmitter<GroupEvents> {
     private currentOwner: OwnerState | null = null
+    private currentUsage: string | null = null
 
     constructor(private inactivity: InactivityMonitor) { super() }
 
@@ -47,10 +50,11 @@ export class GroupManager extends EventEmitter<GroupEvents> {
         this.inactivity.keepalive()
     }
 
-    async joinExclusive(owner: OwnerState, adbKeys: ADBKey[], timeout: number) {
+    async joinExclusive(owner: OwnerState, adbKeys: ADBKey[], timeout: number, adbPublicKeys: string[] = []) {
         if (this.currentOwner) throw new Error('busy')
         this.currentOwner = owner
-        const event = {owner, adbKeys, timeout, usage: 'debug'}
+        this.currentUsage = 'debug'
+        const event = {owner, adbKeys, adbPublicKeys, timeout, usage: 'debug'}
         const results = await Promise.allSettled(this.rawListeners('join').map(listener => Promise.resolve().then(() => listener.call(this, event))))
         const failed = results.find(result => result.status === 'rejected')
         if (failed?.status === 'rejected') throw failed.reason
@@ -60,6 +64,7 @@ export class GroupManager extends EventEmitter<GroupEvents> {
     async leaveExclusive(reason: string) {
         const owner = this.currentOwner
         this.currentOwner = null
+        this.currentUsage = null
         this.inactivity.stop()
 
         if (!owner) {
@@ -79,6 +84,11 @@ export class GroupManager extends EventEmitter<GroupEvents> {
         }
     }
 
+    // The current lease, or null when the device is free
+    lease(): {email: string, usage: string | null} | null {
+        return this.currentOwner ? {email: this.currentOwner.email, usage: this.currentUsage} : null
+    }
+
     async get() {
         if (!this.currentOwner) {
             throw new grouputil.NoGroupError()
@@ -88,7 +98,7 @@ export class GroupManager extends EventEmitter<GroupEvents> {
         return this.currentOwner
     }
 
-    join(owner: OwnerState, timeout: number, usage: string, adbKeys: ADBKey[]) {
+    join(owner: OwnerState, timeout: number, usage: string, adbKeys: ADBKey[], adbPublicKeys: string[] = []) {
         try {
             if (!owner?.group) {
                 throw new Error(`New group is not valid: ${JSON.stringify(owner)}`)
@@ -104,12 +114,13 @@ export class GroupManager extends EventEmitter<GroupEvents> {
             }
 
             this.currentOwner = owner
+            this.currentUsage = usage || null
             this.inactivity.start(timeout, () => {
                 this.leave('automatic_timeout')
                 this.emit('timeout')
             })
 
-            super.emit('join', { owner, timeout, usage, adbKeys })
+            super.emit('join', { owner, timeout, usage, adbKeys, adbPublicKeys })
 
             return this.currentOwner
         }
@@ -131,6 +142,7 @@ export class GroupManager extends EventEmitter<GroupEvents> {
         }
 
         this.currentOwner = null
+        this.currentUsage = null
         return null
     }
 
@@ -171,7 +183,7 @@ export default syrup.serial()
         })
 
         plugin.on('leave', (owner, reason) => {
-            log.important('No longer owned by "%s"', owner.email)
+            log.important('No longer owned by "%s" (reason: %s)', owner.email, reason)
 
             transport.send([
                 wireutil.global,
@@ -203,7 +215,7 @@ export default syrup.serial()
                         return
                     }
 
-                    plugin.join(message.owner!, message.timeout || options.groupTimeout, message.usage!, message.keys)
+                    plugin.join(message.owner!, message.timeout || options.groupTimeout, message.usage!, message.keys, message.publicKeys)
                     transport.send([
                         channel,
                         reply.okay()
