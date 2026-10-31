@@ -56,6 +56,8 @@ export default defineConfig({
             name: 'chromium'
             , use: {
                 ...devices['Desktop Chrome']
+                // Chromium has no H.264 decoder for the scrcpy screen stream
+                , channel: 'chrome'
                 , storageState: '.auth/user.json'
             }
             , dependencies: ['auth as user'],

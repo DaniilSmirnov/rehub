@@ -67,6 +67,7 @@ import {
 } from '../../wire/wire.js'
 import AllModel from '../../db/models/all/index.js'
 import UserModel from '../../db/models/user/index.js'
+import {encodePublicKey, ownerAdbKeys} from '../../util/adbkeyutil.js'
 import type {MessageType} from '@protobuf-ts/runtime'
 
 interface Options {
@@ -608,7 +609,8 @@ export default (async (options: Options) => {
                     const key = await Adb.util.parsePublicKey(data.key)
                     const added = await UserModel.insertUserAdbKey(user.email, {
                         title: data.title,
-                        fingerprint: key.fingerprint
+                        fingerprint: key.fingerprint,
+                        publicKey: encodePublicKey(key)
                     })
                     if (!added) {
                         socket.emit('user.keys.adb.error', {message: 'Key was already added'})
@@ -668,7 +670,7 @@ export default (async (options: Options) => {
                             owner: {email: user.email, name: user.name, group: user.group},
                             timeout: data.timeout || undefined,
                             requirements: wireutil.toDeviceRequirements(data.requirements),
-                            keys: keys.map((key: {fingerprint: string}) => key.fingerprint)
+                            ...ownerAdbKeys(keys)
                         }, {requireOwned: false})
                     }
                     catch (err: any) {

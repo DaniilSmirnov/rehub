@@ -18,10 +18,7 @@ enum DeviceType {
   TIZEN,
 }
 
-const resolveDeviceType = (
-  manufacturer: string | undefined,
-  platform: string | undefined
-): DeviceType => {
+const resolveDeviceType = (manufacturer: string | undefined, platform: string | undefined): DeviceType => {
   if (!manufacturer && !platform) return DeviceType.FETCHING
 
   if (manufacturer === 'Apple') return DeviceType.APPLE
