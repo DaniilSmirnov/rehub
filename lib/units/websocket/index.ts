@@ -657,6 +657,14 @@ export default (async (options: Options) => {
                 run: runTx,
                 acquire: async (serial, rc, data) => {
                     try {
+                        // The device takes over on any GroupMessage: only an admin may
+                        // take a device that another user is holding
+                        const device = await dbapi.loadDeviceBySerial(serial)
+                        const ownerEmail = device?.owner?.email
+                        if (ownerEmail && ownerEmail !== user.email && user.privilege !== apiutil.ADMIN) {
+                            socket.emit('tx.done', rc, {source: serial, success: false, data: 'device_in_use'})
+                            return
+                        }
                         const keys = await UserModel.getUserAdbKeys(user.email)
                         await runTx(serial, rc, GroupMessage, {
                             owner: {email: user.email, name: user.name, group: user.group},
