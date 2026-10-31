@@ -48,6 +48,19 @@ export interface ProcessCallbacks<TContext = {}, TResources = any> {
     // Called before process cleanup
     onCleanup?: (id: string, context: TContext) => void | Promise<void>
 
+    /*
+     * Called for every IPC message from the child except the 'ready' handshake,
+     * for the whole lifetime of the process (not just during startup).
+     */
+    onMessage?: (id: string, context: TContext, message: unknown) => void | Promise<void>
+
+    /*
+     * Whether a process that died on its own is restarted, asked when it is
+     * about to be. When false it is left waiting until start() is called.
+     * Restarted unconditionally when not given.
+     */
+    shouldRestart?: (id: string, context: TContext) => boolean | Promise<boolean>
+
     // Factory function to spawn the actual child process
     spawn: (id: string, context: TContext, resources: TResources[]) => ChildProcess | Promise<ChildProcess>
 }
@@ -56,11 +69,17 @@ export interface ManagedProcess<TContext, TResources> {
     id: string
     state: ProcessState
     startTime: number
+    /* Bumped by every start and stop, so a delayed restart can tell it was overtaken */
+    generation: number
     context: TContext
     resources: TResources[]
 
     // Safe timer - self-clear on process remove or state changes
     timer?: NodeJS.Timeout
+
+    // Currently spawned child, if any. Used to make sure a respawn can never
+    // leave the previous child running.
+    childProcess?: ChildProcess
 }
 
 export interface ProcessStats {
@@ -76,6 +95,9 @@ export interface ProcessStats {
 export class ProcessManager<TContext = any, TResources = any> {
     private log = logger.createLogger('process-manager')
     private processes = new Map<string, ManagedProcess<TContext, TResources>>()
+
+    /* Removed processes whose child is still shutting down */
+    private removals = new Map<string, Promise<void>>()
     private callbacks: ProcessCallbacks<TContext, TResources>
     private killTimeout: number
     private healthCheckConfig?: HealthCheckConfig
@@ -104,6 +126,10 @@ export class ProcessManager<TContext = any, TResources = any> {
             resourceCount?: number
         } = {}
     ) {
+        // The device came back while its previous worker is still shutting
+        // down: never run two workers for one device at once
+        await this.removals.get(id)
+
         if (this.processes.has(id)) {
             this.log.warn('Process "%s" already exists', id)
             return false
@@ -125,6 +151,7 @@ export class ProcessManager<TContext = any, TResources = any> {
             id,
             state: options.initialState || 'waiting',
             startTime: Date.now(),
+            generation: 0,
             context,
             resources
         }
@@ -148,6 +175,14 @@ export class ProcessManager<TContext = any, TResources = any> {
             return true
         }
 
+        // A spawn is already under way. Without this guard two overlapping
+        // start() calls each spawn a child, and the first one is leaked: only
+        // the last terminate handler is kept, so nothing can ever kill it.
+        if (!force && process.state === 'starting') {
+            this.log.warn('Process "%s" is already starting', id)
+            return true
+        }
+
         if (process.timer) {
             clearTimeout(process.timer)
             process.timer = undefined
@@ -156,6 +191,7 @@ export class ProcessManager<TContext = any, TResources = any> {
         this.log.info('Starting process "%s"', id)
         process.state = 'starting'
         process.startTime = Date.now()
+        process.generation++
 
         return new Promise<boolean>(async(resolve) => {
             let childProcess: ChildProcess | null = null
@@ -193,17 +229,41 @@ export class ProcessManager<TContext = any, TResources = any> {
                 // Handle exit errors with restart logic
                 if (err instanceof procutil.ExitError) {
                     this.log.error('Process "%s" died with code %s', id, err.code)
-                    this.log.info('Restarting process "%s" in 2 seconds', id)
+                    const generation = process.generation
 
                     await new Promise(r => setTimeout(r, 2000))
 
-                    if (!this.processes.has(id)) {
+                    const current = this.processes.get(id)
+                    if (!current) {
                         this.log.info('Restart of process "%s" cancelled (process removed)', id)
                         resolveOnce(false)
                         return
                     }
 
-                    // Restart the process
+                    // Stopped or started again meanwhile: that caller is in charge now
+                    if (current.generation !== generation) {
+                        this.log.info('Restart of process "%s" cancelled (stopped or started meanwhile)', id)
+                        resolveOnce(false)
+                        return
+                    }
+
+                    if (this.callbacks.shouldRestart && !await this.callbacks.shouldRestart(id, current.context)) {
+                        // Asking may have taken a while: only a process nobody touched meanwhile is ours to park
+                        if (this.processes.get(id) === current && current.generation === generation) {
+                            this.log.info('Process "%s" is not restarted, waiting to be started', id)
+                            this.setState(id, 'waiting')
+                        }
+                        resolveOnce(false)
+                        return
+                    }
+
+                    if (this.processes.get(id) !== current || current.generation !== generation) {
+                        this.log.info('Restart of process "%s" cancelled (stopped or started meanwhile)', id)
+                        resolveOnce(false)
+                        return
+                    }
+
+                    this.log.info('Restarting process "%s"', id)
                     this.start(id, true).then(resolveOnce)
                     return
                 }
@@ -234,50 +294,117 @@ export class ProcessManager<TContext = any, TResources = any> {
             }
 
             try {
+                // Never leave a previous child running: whoever spawns last owns
+                // the terminate handler, so an unkilled predecessor would keep
+                // serving the same device forever.
+                const previousChild = process.childProcess
+                if (previousChild && previousChild.exitCode === null && !previousChild.killed) {
+                    this.log.warn('Process "%s" still has a live child, killing it first', id)
+                    // Its own terminate handler detaches its listeners first: an exit we
+                    // caused must not count as a crash and schedule yet another restart
+                    const terminatePrevious: (() => Promise<void>) | undefined = (process as any).terminateHandler
+                    ;(process as any).terminateHandler = undefined
+                    if (terminatePrevious) {
+                        await terminatePrevious()
+                    }
+                    else {
+                        previousChild.removeAllListeners('exit')
+                        previousChild.removeAllListeners('error')
+                        previousChild.removeAllListeners('message')
+                        await procutil.gracefullyKill(previousChild, this.killTimeout)
+                    }
+                }
+
                 // Spawn the child process
                 childProcess = await this.callbacks.spawn(id, process.context, [...process.resources])
+                process.childProcess = childProcess
                 this.log.info('Spawned process "%s"', id)
 
                 // Set up event listeners
+                const exitedChild = childProcess
                 childProcess.on('exit', (code?: number, signal?: string) => {
                     cleanup()
 
-                    // TODO: if (isResolved) then emit error
+                    // Forget the child once it is gone, so a later respawn does
+                    // not try to kill an already dead process.
+                    const current = this.processes.get(id)
+                    if (current && current.childProcess === exitedChild) {
+                        current.childProcess = undefined
+                    }
+
+                    // We never get here when we stop the child ourselves: terminate()
+                    // drops this listener first. So it died on its own, even with
+                    // code 0 (a worker giving up gracefully) or killed by someone
+                    // else: either way it is a failure, to report and restart.
                     if (signal) {
                         this.log.warn('Process "%s" was killed with signal %s', id, signal)
-                        resolveOnce(false)
+                        handleError(new procutil.ExitError(-1, `killed with ${signal}`))
                         return
                     }
 
                     if (code === 0) {
-                        this.log.info('Process "%s" stopped cleanly', id)
-                        resolveOnce(true)
-                    } else {
-                        handleError(new procutil.ExitError(code))
+                        this.log.warn('Process "%s" exited on its own', id)
                     }
+                    handleError(new procutil.ExitError(code ?? -1))
                 })
 
                 childProcess.on('error', (err: Error) => {
                     handleError(err)
                 })
 
-                const messageHandler = (message: string) => {
+                const readyHandler = (message: unknown) => {
                     if (message === 'ready') {
                         handleReady()
-                        childProcess?.removeListener('message', messageHandler)
-                    } else {
-                        this.log.warn('Unknown message from process "%s": "%s"', id, message)
+                        childProcess?.removeListener('message', readyHandler)
                     }
                 }
 
+                const messageHandler = async(message: unknown) => {
+                    if (message === 'ready') {
+                        return
+                    }
+
+                    const currentProcess = this.processes.get(id)
+                    if (!currentProcess) {
+                        return
+                    }
+
+                    if (!this.callbacks.onMessage) {
+                        this.log.warn('Unknown message from process "%s": "%s"', id, message)
+                        return
+                    }
+
+                    try {
+                        await this.callbacks.onMessage(id, currentProcess.context, message)
+                    }
+                    catch (err: any) {
+                        this.log.error(
+                            'Error handling message from process "%s": %s', id, err?.message || err
+                        )
+                    }
+                }
+
+                childProcess.on('message', readyHandler)
                 childProcess.on('message', messageHandler)
 
                 // Store kill function for later
                 const originalChildProcess = childProcess
                 this.updateTerminateHandler(id, async () => {
                     cleanup()
-                    this.log.info('Gracefully killing process "%s"', id)
-                    await procutil.gracefullyKill(originalChildProcess, this.killTimeout)
+
+                    // An exited child never emits 'exit' again: waiting for it would hang
+                    if (originalChildProcess.exitCode === null && originalChildProcess.signalCode === null) {
+                        this.log.info('Gracefully killing process "%s"', id)
+                        await procutil.gracefullyKill(originalChildProcess, this.killTimeout)
+                    }
+
+                    const current = this.processes.get(id)
+                    if (current && current.childProcess === originalChildProcess) {
+                        current.childProcess = undefined
+                    }
+
+                    // cleanup() dropped the 'exit' listener that would settle a pending start()
+                    resolveOnce(false)
                 })
             } catch (err: any) {
                 this.log.error('Failed to spawn process "%s": %s', id, err.message)
@@ -298,7 +425,7 @@ export class ProcessManager<TContext = any, TResources = any> {
         }
     }
 
-    // Stop a process
+    // Stop a process, keeping it and its resources
     async stop(id: string): Promise<void> {
         const process = this.processes.get(id)
         if (!process) {
@@ -306,16 +433,27 @@ export class ProcessManager<TContext = any, TResources = any> {
             return
         }
 
+        await this.terminate(id, process)
+    }
+
+    /*
+     * Wait for the child to actually exit: callers (remove() releasing the
+     * resources, cleanup() before the owner exits) rely on it being gone.
+     */
+    private async terminate(id: string, process: ManagedProcess<TContext, TResources>): Promise<void> {
         this.log.info('Stopping process "%s"', id)
+        process.generation++
 
         await this.callbacks.onCleanup?.(id, process.context)
 
-        // Call the terminate handler if available
+        // The handler is single use, the child it kills is gone afterwards.
         // We don't expose the property via TypeScript API, so we access a "non-existent" property.
-        ;(process as any).terminateHandler?.()
+        const terminate: (() => Promise<void>) | undefined = (process as any).terminateHandler
+        ;(process as any).terminateHandler = undefined
+        await terminate?.()
     }
 
-    // Remove a process and release its resources
+    // Remove a process and release its resources once its child has exited
     async remove(id: string): Promise<void> {
         const process = this.processes.get(id)
         if (!process) {
@@ -323,24 +461,27 @@ export class ProcessManager<TContext = any, TResources = any> {
             return
         }
 
-        // Stop the process first
-        await this.stop(id)
+        // Forget it right away: the device may come back while its child shuts
+        // down and must then get a new process. create() waits for this removal.
+        this.processes.delete(id)
 
-        // Clear any timers
         if (process.timer) {
             clearTimeout(process.timer)
             process.timer = undefined
         }
 
-        // Release resources
-        if (this.resourcePool && process.resources.length > 0) {
-            this.resourcePool.release(process.resources)
-            this.log.info(`Released ${process.resources.length} resources from process "${id}"`)
-        }
+        const removal = this.terminate(id, process).finally(() => {
+            if (this.resourcePool && process.resources.length > 0) {
+                this.resourcePool.release(process.resources)
+                this.log.info(`Released ${process.resources.length} resources from process "${id}"`)
+            }
 
-        // Remove from map
-        this.processes.delete(id)
-        this.log.info('Removed process "%s"', id)
+            this.removals.delete(id)
+            this.log.info('Removed process "%s"', id)
+        })
+
+        this.removals.set(id, removal)
+        await removal
     }
 
     // Get a process by ID
@@ -442,7 +583,8 @@ export class ProcessManager<TContext = any, TResources = any> {
         this.log.info('Cleaning up all processes')
 
         const ids = Array.from(this.processes.keys())
-        await Promise.all(ids.map(id => this.remove(id)))
+        // Including removals already under way: no child may outlive its owner
+        await Promise.all([...ids.map(id => this.remove(id)), ...this.removals.values()])
 
         this.log.info('All processes cleaned up')
     }

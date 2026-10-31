@@ -1,5 +1,9 @@
 import { Container } from 'inversify'
 
+import { LogsTrackerService } from '@/services/logs-tracker-service/logs-tracker-service'
+import { TransactionService } from '@/services/core/transaction-service/transaction-service'
+import { GroupService } from '@/services/group-service'
+import { DeviceSession } from '@/services/device-session'
 import { InfoService } from '@/services/info-service'
 import { LogcatService } from '@/services/logcat-service'
 import { BookingService } from '@/services/booking-service'
@@ -9,9 +13,9 @@ import { ScalingService } from '@/services/scaling-service/scaling-service'
 import { DeviceLifecycleService } from '@/services/device-lifecycle-service'
 import { KeyboardService } from '@/services/keyboard-service/keyboard-service'
 import { SaveLogsService } from '@/services/save-logs-service/save-logs-service'
-import { PortForwardingService } from '@/services/port-forwarding-service/port-forwarding-service'
 import { ApplicationInstallationService } from '@/services/application-installation/application-installation-service'
 
+import { DeviceDisconnection } from '@/store/device-disconnection'
 import { LinkOpenerStore } from '@/store/link-opener-store'
 import { DeviceConnection } from '@/store/device-connection'
 import { ShellControlStore } from '@/store/shell-control-store'
@@ -25,15 +29,27 @@ import { DeviceScreenStore } from '@/store/device-screen-store/device-screen-sto
   `serial` value is available within the container's scope. This allows services to be resolved
   specifically for the corresponding device, enabling scoped dependency management in multi-device scenarios
 */
-export const createDeviceContainer = (serial: string): Container => {
+export const createDeviceContainer = (serial: string, provider?: string): Container => {
   /* NOTE:
-    Inversify-react automatically establishes a hierarchy of containers 
-    (https://github.com/inversify/InversifyJS/blob/master/wiki/hierarchical_di.md) 
+    Inversify-react automatically establishes a hierarchy of containers
+    (https://github.com/inversify/InversifyJS/blob/master/wiki/hierarchical_di.md)
     within the React tree when multiple Providers are used.
     This means that if the device container lacks bindings, it passes the request up to its parent
     container (in our case, globalContainer)
   */
   const deviceContainer = new Container({ defaultScope: 'Singleton' })
+
+  const session = new DeviceSession(serial, provider)
+  deviceContainer.bind(CONTAINER_IDS.deviceSession).toConstantValue(session)
+
+  if (session.silent) {
+    deviceContainer
+      .bind(CONTAINER_IDS.factoryTransactionService)
+      .toConstantValue(<T>() => new TransactionService<T>(session.socket))
+    deviceContainer.bind(CONTAINER_IDS.groupService).to(GroupService)
+    deviceContainer.bind(CONTAINER_IDS.deviceDisconnection).to(DeviceDisconnection)
+    deviceContainer.bind(CONTAINER_IDS.logsTrackerService).toDynamicValue(() => new LogsTrackerService(session.socket))
+  }
 
   deviceContainer.bind<string>(CONTAINER_IDS.deviceSerial).toConstantValue(serial)
 
@@ -41,7 +57,8 @@ export const createDeviceContainer = (serial: string): Container => {
   deviceContainer.bind(CONTAINER_IDS.touchService).to(TouchService)
   deviceContainer.bind(CONTAINER_IDS.logcatService).to(LogcatService)
   deviceContainer.bind(CONTAINER_IDS.scalingService).to(ScalingService)
-  deviceContainer.bind(CONTAINER_IDS.bookingService).to(BookingService)
+
+  if (!session.silent) deviceContainer.bind(CONTAINER_IDS.bookingService).to(BookingService)
   deviceContainer.bind(CONTAINER_IDS.linkOpenerStore).to(LinkOpenerStore)
   deviceContainer.bind(CONTAINER_IDS.keyboardService).to(KeyboardService)
   deviceContainer.bind(CONTAINER_IDS.saveLogsService).to(SaveLogsService)
@@ -51,7 +68,6 @@ export const createDeviceContainer = (serial: string): Container => {
   deviceContainer.bind(CONTAINER_IDS.deviceControlStore).to(DeviceControlStore)
   deviceContainer.bind(CONTAINER_IDS.deviceBySerialStore).to(DeviceBySerialStore)
   deviceContainer.bind(CONTAINER_IDS.fileExplorerService).to(FileExplorerService)
-  deviceContainer.bind(CONTAINER_IDS.portForwardingService).to(PortForwardingService)
   deviceContainer.bind(CONTAINER_IDS.deviceLifecycleService).to(DeviceLifecycleService)
   deviceContainer.bind(CONTAINER_IDS.applicationInstallationService).to(ApplicationInstallationService)
 

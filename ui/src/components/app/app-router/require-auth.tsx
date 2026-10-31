@@ -1,41 +1,41 @@
 import { Outlet } from 'react-router'
 import { observer } from 'mobx-react-lite'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 import { ConditionalRender } from '@/components/lib/conditional-render'
 
-import { socket } from '@/api/socket'
+import { connectWithBackoff } from '@/api/socket'
 
 import { authStore } from '@/store/auth-store'
-import { variablesConfig } from '@/config/variables.config'
 
 import { getAuthRoute } from '@/constants/route-paths'
 
 export const RequireAuth = observer(() => {
+  // A token in the URL wins over a stored one: a page embedding DeviceHub in an iframe passes its user's token
+  const [urlJwt, setUrlJwt] = useState(() => new URLSearchParams(location.search).get('jwt'))
+
   useEffect(() => {
-    if (!authStore.isAuthed) {
-      const params = new URLSearchParams(location.search)
-      const jwt = params.get('jwt')
+    if (!authStore.isHydrated) return
 
-      if (!jwt) {
-        window.location.assign(`${variablesConfig[import.meta.env.MODE].openStfApiHostUrl}${getAuthRoute()}`)
-
-        return
-      }
-
-      authStore.login(jwt)
+    if (urlJwt) {
+      authStore.login(urlJwt)
       window.history.replaceState({}, '', location.pathname + location.hash)
+      setUrlJwt(null)
+
+      return
     }
-  }, [authStore.isAuthed])
+
+    if (!authStore.isAuthed) window.location.assign(`${getAuthRoute()}`)
+  }, [authStore.isHydrated, authStore.isAuthed, urlJwt])
 
   useEffect(() => {
-    if (authStore.isHydrated && authStore.isAuthed) {
-      socket.connect()
+    if (authStore.isHydrated && authStore.isAuthed && !urlJwt) {
+      connectWithBackoff()
     }
-  }, [authStore.isHydrated, authStore.isAuthed])
+  }, [authStore.isHydrated, authStore.isAuthed, urlJwt])
 
   return (
-    <ConditionalRender conditions={[authStore.isAuthed]}>
+    <ConditionalRender conditions={[authStore.isAuthed, !urlJwt]}>
       <Outlet />
     </ConditionalRender>
   )

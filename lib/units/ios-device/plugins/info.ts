@@ -1,8 +1,8 @@
 import syrup from '@devicefarmer/stf-syrup'
 import wireutil from '../../../wire/util.js'
 import logger from '../../../util/logger.js'
-import _ from 'lodash'
-import push from '../../base-device/support/push.js'
+import transport from '../../base-device/support/transport.js'
+import {screenWsUrl} from '../../base-device/support/screen-ws-url.js'
 import {getModelName} from './util/iosutil.js'
 import wdaClient from './wda/client.js'
 import {
@@ -15,16 +15,17 @@ import {
     UpdateIosDevice
 } from '../../../wire/wire.js'
 import {execFileSync} from 'child_process'
+import {describeDevice} from '../support/go-ios.js'
 
 export default syrup.serial()
-    .dependency(push)
+    .dependency(transport)
     .dependency(wdaClient)
-    .define(async(options, push, wdaClient) => {
+    .define(async(options, transport, wdaClient) => {
         const log = logger.createLogger('device:info')
 
-        const deviceInfo = JSON.parse(
-            execFileSync('idb', ['describe', '--udid', options.serial, '--json']).toString()
-        )
+        const deviceInfo = options.iosBackend === 'go-ios' && !options.isSimulator
+            ? await describeDevice({goIosPath: options.goIosPath || 'ios', serial: options.serial})
+            : JSON.parse(execFileSync('idb', ['describe', '--udid', options.serial, '--json']).toString())
 
         options.deviceInfo = deviceInfo
         const marketName = getModelName(deviceInfo?.extended?.device?.ProductType) || deviceInfo?.name || 'unknown'
@@ -38,7 +39,7 @@ export default syrup.serial()
 
         const os = options.deviceInfo?.os_version?.split(' ')
 
-        push.send([
+        transport.send([
             wireutil.global,
             wireutil.pack(InitializeIosDeviceState, {
                 serial: options.serial,
@@ -63,7 +64,7 @@ export default syrup.serial()
 
         wdaClient.on('session', sdk => {
             if (!sdk) return
-            push.send([
+            transport.send([
                 wireutil.global,
                 wireutil.pack(SdkIosVersion, {
                     id: options.serial,
@@ -73,7 +74,7 @@ export default syrup.serial()
         })
 
         wdaClient.on('battery', (batteryState, batteryLevel) => {
-            push.send([
+            transport.send([
                 wireutil.global,
                 wireutil.pack(BatteryEvent, {
                     serial: options.serial,
@@ -90,7 +91,7 @@ export default syrup.serial()
 
         wdaClient.on('rotation', (orientation, rotationDegrees) => {
             if (!rotationDegrees) return
-            push.send([
+            transport.send([
                 wireutil.global,
                 wireutil.pack(RotationEvent, {
                     serial: options.serial,
@@ -100,15 +101,11 @@ export default syrup.serial()
         })
 
         wdaClient.on('display', (display) => {
-            push.send([
+            transport.send([
                 wireutil.global,
                 wireutil.pack(SizeIosDevice, {
                     id: options.serial,
-                    url: _.template(options.screenWsUrlPattern || '')({
-                        publicIp: options.publicIp,
-                        publicPort: options.screenPort,
-                        serial: options.serial
-                    }),
+                    url: screenWsUrl({...options, screenWsUrlPattern: options.screenWsUrlPattern || ''}),
                     ...display
                 })
             ])

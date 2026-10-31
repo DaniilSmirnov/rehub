@@ -1,183 +1,222 @@
 import syrup from '@devicefarmer/stf-syrup'
 import logger from '../../../util/logger.js'
-import {
-    AutoGroupMessage,
-    DeviceStatusChange,
-    GroupMessage,
-    JoinGroupMessage,
-    LeaveGroupMessage, UngroupMessage
-} from '../../../wire/wire.js'
 import wireutil from '../../../wire/util.js'
 import * as grouputil from '../../../util/grouputil.js'
 import lifecycle from '../../../util/lifecycle.js'
-import * as apiutil from '../../../util/apiutil.js'
-import solo from './solo.js'
 import router from '../support/router.js'
-import push from '../support/push.js'
-import sub from '../support/sub.js'
-import channels from '../support/channels.js'
+import transport from '../support/transport.js'
 import EventEmitter from 'events'
+import type {InactivityMonitor} from '../../../util/inactivity-monitor.js'
+import {
+    GroupMessage,
+    JoinGroupMessage,
+    LeaveGroupMessage,
+    UngroupMessage
+} from '../../../wire/wire.js'
 
-interface GroupState {
+interface OwnerState {
     email: string
     name: string
     group: string
+}
+
+interface JoinEvent {
+    owner: OwnerState
+    adbKeys: ADBKey[]
+    // The full keys stored for some of adbKeys, in the ~/.android/adbkey.pub format
+    adbPublicKeys: string[]
+    timeout: number
+    usage: string
 }
 
 type ADBKey = string
 type Joined = boolean
 
 interface GroupEvents {
-    join: [GroupState, ADBKey[]]
-    leave: [GroupState | null]
+    join: [JoinEvent]
+    leave: [OwnerState, string]
     autojoin: [ADBKey, Joined]
+    error: [string]
+    timeout: []
+}
+
+export class GroupManager extends EventEmitter<GroupEvents> {
+    private currentOwner: OwnerState | null = null
+    private currentUsage: string | null = null
+
+    constructor(private inactivity: InactivityMonitor) { super() }
+
+    keepalive() { // WARN: high-frequency call
+        this.inactivity.keepalive()
+    }
+
+    async joinExclusive(owner: OwnerState, adbKeys: ADBKey[], timeout: number, adbPublicKeys: string[] = []) {
+        if (this.currentOwner) throw new Error('busy')
+        this.currentOwner = owner
+        this.currentUsage = 'debug'
+        const event = {owner, adbKeys, adbPublicKeys, timeout, usage: 'debug'}
+        const results = await Promise.allSettled(this.rawListeners('join').map(listener => Promise.resolve().then(() => listener.call(this, event))))
+        const failed = results.find(result => result.status === 'rejected')
+        if (failed?.status === 'rejected') throw failed.reason
+        return owner
+    }
+
+    async leaveExclusive(reason: string) {
+        const owner = this.currentOwner
+        this.currentOwner = null
+        this.currentUsage = null
+        this.inactivity.stop()
+
+        if (!owner) {
+            return
+        }
+
+        const results = await Promise.allSettled(
+            this.rawListeners('leave')
+                .map(listener =>
+                    Promise.resolve().then(() => listener.call(this, owner, reason))
+                )
+        )
+
+        const failed = results.find(result => result.status === 'rejected')
+        if (failed?.status === 'rejected') {
+            throw failed.reason
+        }
+    }
+
+    // The current lease, or null when the device is free
+    lease(): {email: string, usage: string | null} | null {
+        return this.currentOwner ? {email: this.currentOwner.email, usage: this.currentUsage} : null
+    }
+
+    async get() {
+        if (!this.currentOwner) {
+            throw new grouputil.NoGroupError()
+            return
+        }
+
+        return this.currentOwner
+    }
+
+    join(owner: OwnerState, timeout: number, usage: string, adbKeys: ADBKey[], adbPublicKeys: string[] = []) {
+        try {
+            if (!owner?.group) {
+                throw new Error(`New group is not valid: ${JSON.stringify(owner)}`)
+            }
+
+            if (!!this.currentOwner?.group) {
+                if (this.currentOwner.email === owner.email) {
+                    this.keepalive()
+                    return this.currentOwner
+                }
+
+                this.leave('takeover', false)
+            }
+
+            this.currentOwner = owner
+            this.currentUsage = usage || null
+            this.inactivity.start(timeout, () => {
+                this.leave('automatic_timeout')
+                this.emit('timeout')
+            })
+
+            super.emit('join', { owner, timeout, usage, adbKeys, adbPublicKeys })
+
+            return this.currentOwner
+        }
+        catch (err: any) {
+            super.emit('error', `Failed to join group ${JSON.stringify(owner)}, Error: ${err?.message}`)
+            return this.currentOwner
+        }
+    }
+
+    leave(reason: string, send = true) {
+        if (!this.currentOwner) {
+            return null
+        }
+
+        this.inactivity.stop()
+
+        if (send) {
+            super.emit('leave', this.currentOwner, reason)
+        }
+
+        this.currentOwner = null
+        this.currentUsage = null
+        return null
+    }
+
+    beforeActionCheck =
+        async(message: any) => true
+
+    // Set that for custom checks before GroupMessage/UngroupMessage processed (optional)
+    setCheckBeforeAction =
+        (cb: (message: any) => Promise<boolean>) => {
+            this.beforeActionCheck = cb
+        }
 }
 
 export default syrup.serial()
-    .dependency(solo)
     .dependency(router)
-    .dependency(push)
-    .dependency(sub)
-    .dependency(channels)
-    .define(async(options, solo, router, push, sub, channels) => {
+    .dependency(transport)
+    .define(async(options, router, transport) => {
         const log = logger.createLogger('base-device:plugins:group')
 
-        const plugin = new class GroupManager extends EventEmitter<GroupEvents> {
-            private currentGroup: GroupState | null = null
+        const plugin = new GroupManager(transport.inactivity)
+        transport.silent?.bindGroup(plugin)
 
-            keepalive = () => {
-                if (this.currentGroup) {
-                    channels.keepalive(this.currentGroup.group)
-                }
-            }
+        plugin.on('join', e => {
+            log.important('Now owned by "%s"', e.owner.email)
+            log.important('Device now in group "%s"', e.owner.name)
+            log.info(`Rent time is ${e.timeout}`)
+            log.info('Subscribing to group channel "%s"', e.owner.group)
 
-            get = async() => {
-                if (!this.currentGroup) {
-                    throw new grouputil.NoGroupError()
-                    return
-                }
+            transport.send([
+                wireutil.global,
+                wireutil.pack(JoinGroupMessage, {
+                    serial: options.serial,
+                    owner: e.owner,
+                    usage: e.usage,
+                    timeout: e.timeout
+                })
+            ])
+        })
 
-                return this.currentGroup
-            }
+        plugin.on('leave', (owner, reason) => {
+            log.important('No longer owned by "%s" (reason: %s)', owner.email, reason)
 
-            join = async(newGroup: GroupState, timeout: number, usage: string, keys: string[]) => {
-                try {
-                    if (!newGroup?.group) {
-                        throw new Error(`New group is not valid: ${JSON.stringify(newGroup)}`)
-                    }
+            transport.send([
+                wireutil.global,
+                wireutil.pack(LeaveGroupMessage, {
+                    serial: options.serial,
+                    owner,
+                    reason
+                })
+            ])
+        })
 
-                    if (!!this.currentGroup?.group) { // if device in group
-                        if (this.currentGroup.group !== newGroup.group) { // and is not same
-                            log.error(`Cannot join group ${JSON.stringify(newGroup)} since this device is in group ${JSON.stringify(this.currentGroup)}`)
-                            throw new grouputil.AlreadyGroupedError()
-                        }
-
-                        log.info('Update timeout for %s', apiutil.QUARTER_MINUTES)
-                        channels.updateTimeout(this.currentGroup.group, apiutil.QUARTER_MINUTES)
-
-                        const newTimeout = channels.getTimeout(this.currentGroup.group)
-                        push.send([
-                            wireutil.global,
-                            wireutil.pack(DeviceStatusChange, {
-                                serial: options.serial,
-                                timeout: newTimeout || undefined
-                            })
-                        ])
-
-                        return this.currentGroup
-                    }
-
-                    this.currentGroup = newGroup
-
-                    log.important('Now owned by "%s"', this.currentGroup.email)
-                    log.important('Device now in group "%s"', this.currentGroup.name)
-                    log.info(`Rent time is ${timeout}`)
-                    log.info('Subscribing to group channel "%s"', this.currentGroup.group)
-
-                    channels.register(this.currentGroup.group, {
-                        timeout: timeout || options.groupTimeout,
-                        alias: solo.channel
-                    })
-
-                    sub.subscribe(this.currentGroup.group)
-                    plugin.emit('join', this.currentGroup, keys)
-
-                    push.send([
-                        wireutil.global,
-                        wireutil.pack(JoinGroupMessage, {
-                            serial: options.serial,
-                            owner: this.currentGroup,
-                            usage,
-                            timeout
-                        })
-                    ])
-
-                    return this.currentGroup
-                }
-                catch (err: any) {
-                    log.error(`Failed to join group ${JSON.stringify(newGroup)}, Error: %s`, err?.message)
-                    return this.currentGroup
-                }
-            }
-
-            leave = async(reason: string) => {
-                if (!this.currentGroup) {
-                    throw new grouputil.NoGroupError()
-                }
-
-                log.important('No longer owned by "%s"', this.currentGroup.email)
-                log.info('Unsubscribing from group channel "%s"', this.currentGroup.group)
-
-                push.send([
-                    wireutil.global,
-                    wireutil.pack(LeaveGroupMessage, {
-                        serial: options.serial,
-                        owner: this.currentGroup,
-                        reason
-                    })
-                ])
-
-                channels.unregister(this.currentGroup.group)
-                sub.unsubscribe(this.currentGroup.group)
-
-                this.currentGroup = null
-                plugin.emit('leave', this.currentGroup)
-                return this.currentGroup
-            }
-
-            beforeActionCheck =
-                async(message: any) => true
-
-            // Set that for custom checks before GroupMessage/UngroupMessage processed (optional)
-            setCheckBeforeAction =
-                (cb: (message: any) => Promise<boolean>) => {
-                    this.beforeActionCheck = cb
-                }
-
-            checkBeforeAction =
-                (msgName: string, message: any, channel: string, reply: ReturnType<typeof wireutil.reply>) =>
-                    this.beforeActionCheck(message)
-                        .catch((err: any) => {
-                            log.error('Error before processing %s: %s', msgName, err?.message)
-                            push.send([
-                                channel,
-                                reply.fail(err.message)
-                            ])
-
-                            return false
-                        })
-        }()
+        plugin.on('error', error => log.error(error))
 
         router
             .on(GroupMessage, async(channel, message) => {
                 const reply = wireutil.reply(options.serial)
                 try {
-                    if (!await plugin.checkBeforeAction('GroupMessage', message, channel, reply)) {
+                    const check = await plugin.beforeActionCheck(message).catch(err => {
+                        log.error('Error before processing GroupMessage: %s', err?.message)
+                        transport.send([
+                            channel,
+                            reply.fail(err.message)
+                        ])
+
+                        return false
+                    })
+
+                    if (!check) {
                         return
                     }
 
-                    await plugin.join(message.owner!, message.timeout!, message.usage!, message.keys)
-                    push.send([
+                    plugin.join(message.owner!, message.timeout || options.groupTimeout, message.usage!, message.keys, message.publicKeys)
+                    transport.send([
                         channel,
                         reply.okay()
                     ])
@@ -185,34 +224,32 @@ export default syrup.serial()
                 catch (err: any) {
                     log.error('Failed processing GroupMessage: %s', err?.message)
                     if (err instanceof grouputil.AlreadyGroupedError) {
-                        push.send([
+                        transport.send([
                             channel,
                             reply.fail(err.message)
                         ])
                     }
                 }
             })
-            .on(AutoGroupMessage, async(channel, message) => {
-                try {
-                    await plugin.join(message.owner!, 0, message.identifier, [])
-                    plugin.emit('autojoin', message.identifier, true)
-                }
-                catch (err: any) {
-                    log.error('Failed processing AutoGroupMessage: %s', err?.message)
-                    if (err instanceof grouputil.AlreadyGroupedError) {
-                        plugin.emit('autojoin', message.identifier, false)
-                    }
-                }
-            })
             .on(UngroupMessage, async(channel, message) => {
                 const reply = wireutil.reply(options.serial)
                 try {
-                    if (!await plugin.checkBeforeAction('UngroupMessage', message, channel, reply)) {
+                    const check = await plugin.beforeActionCheck(message).catch(err => {
+                        log.error('Error before processing UngroupMessage: %s', err?.message)
+                        transport.send([
+                            channel,
+                            reply.fail(err.message)
+                        ])
+
+                        return false
+                    })
+
+                    if (!check) {
                         return
                     }
 
-                    await plugin.leave('ungroup_request')
-                    push.send([
+                    plugin.leave('ungroup_request')
+                    transport.send([
                         channel,
                         reply.okay()
                     ])
@@ -220,7 +257,7 @@ export default syrup.serial()
                 catch (err: any) {
                     log.error('Failed processing UngroupMessage: %s', err?.message)
                     if (err instanceof grouputil.NoGroupError) {
-                        push.send([
+                        transport.send([
                             channel,
                             reply.fail(err.message)
                         ])
@@ -228,17 +265,24 @@ export default syrup.serial()
                 }
             })
 
-        // @ts-ignore
-        channels.on('timeout', async(channel) => {
-            const currentGroup = await plugin.get()
-            if (currentGroup && channel === currentGroup.group) {
-                plugin.leave('automatic_timeout')
-            }
+        // Any inbound device message counts as activity: refresh the current
+        // group's lease so an actively-used device doesn't time out. Under
+        // ROUTER/DEALER the router no longer sees a per-channel subscription, so
+        // this activity-based keepalive lives here where the current group is
+        // known (the router's emitted "channel" is a correlationId, not a group
+        // channel). Silent commands update the same monitor only after lease authorization.
+        router.on('message', () => {
+            if (!options.silent) plugin.keepalive()
         })
 
         lifecycle.observe(async() => {
             try {
-                await plugin.leave('device_absent')
+                if (options.silent) {
+                    await transport.silent?.close()
+                }
+                else {
+                    plugin.leave('device_absent')
+                }
             }
             catch (err: any) {
                 log.error('Failed leave from group on process exit: %s', err?.message)

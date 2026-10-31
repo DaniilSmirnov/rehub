@@ -1,13 +1,15 @@
-# Welcome to VK DeviceHub!
-<img src="https://raw.githubusercontent.com/VKCOM/devicehub/refs/heads/master/doc/logo.svg" style="width:300px;height:100px;" alt="VK Devicehub">
+# Welcome to rehub!
+<img src="./doc/rehub-logo.svg" style="width:300px;height:100px;" alt="rehub">
 
 ## About Project
 
-VK DeviceHub is a fork of the DeviceFarmer/stf project developed by members of VK Company.
+rehub is a fork of [VK DeviceHub](https://github.com/VKCOM/devicehub), which itself is a fork of the DeviceFarmer/stf project developed by members of VK Company.
+
+rehub is maintained by Daniil, one of the original authors of DeviceHub.
 
 If you have ideas, suggestions, or would like to participate in development, we welcome you to join our development chat ([link](https://vk.me/join/QCCJfaPu544UDzXgQrXe1jNVMyVEdh9bFZg=)).
 
-You can watch a presentation about our product at the Heisenbug 2024 conference by following this link:
+You can watch a presentation about the original project at the Heisenbug 2024 conference by following this link:
 [Presentation at Heisenbug 2024 conference](https://heisenbug.ru/talks/cee3ec59796e43f6a3d4ae508db157d3/?referer=/schedule/days/)
 <img src="https://raw.githubusercontent.com/VKCOM/devicehub/refs/heads/master/doc/showcase.png" alt="VK Devicehub">
 
@@ -79,6 +81,9 @@ Originally, STF was an internal project without robust security measures and enc
 However, we have addressed different issues and Common Vulnerabilities and Exposures (CVEs). Additionally, we have updated dependencies that had CVEs.
 
 We welcome contributions to further enhance the security of the project.
+
+### Internal message bus
+Units talk to each other over ZeroMQ (the proxy ROUTER on 7110, the processor ROUTER on 7160). Set the same `ZMQ_SECRET` environment variable for every unit, including providers on other hosts, to enable CURVE: traffic is encrypted and only units that know the secret can connect. Without it, anyone who can reach these ports can send commands to devices, so keep them closed to untrusted networks. For the docker-compose setups, uncomment `ZMQ_SECRET` in [scripts/variables.env](scripts/variables.env) and set your own value.
 
 
 ## Building
@@ -203,7 +208,8 @@ You may also want to remove our support binaries, although they won't run unless
 adb shell rm /data/local/tmp/minicap \
   /data/local/tmp/minicap.so \
   /data/local/tmp/minitouch \
-  /data/local/tmp/minirev
+  /data/local/tmp/minirev \
+  '/data/local/tmp/devicehub-scrcpy-server-*.jar'
 ```
 
 Your device is now clean.
@@ -211,11 +217,15 @@ Your device is now clean.
 
 ### Scrcpy
 
-If you want use scrcpy instead minicap run app with next command(Scrcpy functionality is in unstable state yet):
+With `--need-scrcpy` (on `stf provider`, `stf device` or `stf local`) Android screens are streamed as H.264 by [scrcpy](https://github.com/Genymobile/scrcpy) instead of JPEG frames by minicap: the same picture takes less bandwidth, and the device encodes it in hardware. Input still goes through minitouch and STFService.
 
 ```bash
-stf local --need-scrcpy true
+stf local --need-scrcpy
 ```
+
+- The browser decodes the stream with WebCodecs: a recent Chrome, Edge, Safari or Firefox, over HTTPS (or `localhost`).
+- `--scrcpy-bit-rate` sets the video bit rate at quality 80, the top of the quality slider (default 4 Mbit/s); lower qualities scale it down, and changing the quality restarts the stream. `--screen-frame-rate` caps the frame rate.
+- The Docker image ships the scrcpy server. Elsewhere, download it once with `node scripts/fetch-scrcpy-server.mjs`, which checks its SHA-256. Without it, or when scrcpy cannot start on a device, the device falls back to minicap.
 
 ## Testing
 

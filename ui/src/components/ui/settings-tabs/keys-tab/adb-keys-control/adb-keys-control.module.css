@@ -1,3 +1,80 @@
 .adbKeysControl {
   overflow: hidden;
 }
+
+.hint {
+  margin-bottom: 12px;
+  color: var(--vkui--color_text_secondary);
+}
+
+/* As wide as the command: the title wraps to it */
+.instructionBlock {
+  flex: 1;
+  width: min-content;
+
+  /* The free height goes between the title and the command */
+  & > * {
+    flex: 1;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  @media (width <= 768px) {
+    width: auto;
+  }
+}
+
+/*
+ * The form takes whatever the instruction leaves. Its fields are cells of this
+ * grid, so the instruction can span exactly the key and device rows
+ */
+.addKey {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+
+  & > form {
+    display: contents;
+  }
+
+  /* The card already pads its content on the left */
+  & > form > * {
+    grid-column: 1;
+    padding-left: 0;
+  }
+
+  /* Under both the form and the instruction */
+  & > form > .submit {
+    grid-column: 1 / -1;
+  }
+
+  @media (width <= 768px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.instruction {
+  display: flex;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  flex-direction: column;
+  align-self: stretch;
+
+  @media (width <= 768px) {
+    grid-column: 1;
+    grid-row: auto;
+    order: -1;
+
+    /* In line with the fields under it */
+    padding-left: 0;
+  }
+}
+
+/* The block keeps its own padding on every side, the command gets no extra one */
+.instructionBlock .instructionContent {
+  padding: 12px 0 0;
+
+  & > * {
+    min-width: max-content;
+  }
+}

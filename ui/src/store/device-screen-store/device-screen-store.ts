@@ -1,6 +1,7 @@
 import { t } from 'i18next'
-import { makeAutoObservable, runInAction } from 'mobx'
+import { autorun, makeAutoObservable, runInAction } from 'mobx'
 import { inject, injectable } from 'inversify'
+import { backOff } from 'exponential-backoff'
 
 import { CONTAINER_IDS } from '@/config/inversify/container-ids'
 import { DeviceBySerialStore } from '@/store/device-by-serial-store'
@@ -8,35 +9,56 @@ import { deviceErrorModalStore } from '@/store/device-error-modal-store'
 import { deviceConnectionRequired } from '@/config/inversify/decorators'
 import { authStore } from '@/store/auth-store'
 
+import { H264ScreenDecoder } from './h264-screen-decoder'
+
 import type { ElementBoundSize, StartScreenStreamingMessage } from './types'
-import type { Device } from '@/generated/types'
+
+class AuthError extends Error {
+  constructor() {
+    super('Unauthorized')
+    this.name = 'AuthError'
+  }
+}
 
 @injectable()
 @deviceConnectionRequired()
 export class DeviceScreenStore {
-  private readonly websocketReconnectionInterval = 5000 // NOTE: 5s
-  private readonly websocketReconnectionMaxAttempts = 3 // NOTE: 5s * 3 -> 15s total delay
   private websocket: WebSocket | null = null
-  private websocketReconnecting = false
-  private websocketReconnectionAttempt = 0
-  private websocketReconnectionTimeoutID: ReturnType<typeof setTimeout> | null = null
+  private backoffPromise: Promise<void> | null = null
   private disposed = false
 
   private context: ImageBitmapRenderingContext | null = null
   private canvasWrapper: HTMLDivElement | null = null
-  private device: Device | null = null
   private showScreen = true
   private options = {
     autoScaleForRetina: true,
     density: Math.max(1, Math.min(1.5, devicePixelRatio || 1)),
     minScale: 0.36,
   }
-  private adjustedBoundSize = {
+  private adjustedBoundSize: ElementBoundSize = {
     width: 0,
     height: 0,
   }
   private screenRotation = 0
   private isScreenStreamingJustStarted = false
+
+  /**
+   * Native (device-side framebuffer) dimensions. Seeded from the screen-streaming
+   * WebSocket's `start { realWidth, realHeight }` banner, and as a defence-in-depth
+   * fallback from the first decoded image frame. Independent of `device.display.*`,
+   * which can be transiently undefined right after device introduction.
+   */
+  private nativeWidth = 0
+  private nativeHeight = 0
+  private hasNativeSize = false
+
+  /** MobX autorun disposer, used to re-trigger connect when display.url becomes available. */
+  private urlReactionDisposer: (() => void) | null = null
+
+  /** Set while the device streams H.264 (scrcpy) instead of JPEG frames (minicap). */
+  private h264Decoder: H264ScreenDecoder | null = null
+  /** Latest decoded frame not drawn yet: older ones are dropped, not queued. */
+  private pendingFrame: VideoFrame | null = null
 
   isAspectRatioModeLetterbox = false
   isScreenLoading = false
@@ -45,13 +67,11 @@ export class DeviceScreenStore {
   constructor(@inject(CONTAINER_IDS.deviceBySerialStore) private deviceBySerialStore: DeviceBySerialStore) {
     this.updateBounds = this.updateBounds.bind(this)
     this.messageListener = this.messageListener.bind(this)
-    this.openListener = this.openListener.bind(this)
 
-    makeAutoObservable(this)
-  }
-
-  get getDevice(): Device | null {
-    return this.device
+    makeAutoObservable<DeviceScreenStore, 'h264Decoder' | 'pendingFrame'>(this, {
+      h264Decoder: false,
+      pendingFrame: false,
+    })
   }
 
   get getCanvasWrapper(): HTMLDivElement | null {
@@ -66,16 +86,11 @@ export class DeviceScreenStore {
     this.isScreenLoading = value
   }
 
-  async init(): Promise<void> {
-    this.device = await this.deviceBySerialStore.fetch()
-  }
-
   async startScreenStreaming(canvas: HTMLCanvasElement, canvasWrapper: HTMLDivElement): Promise<void> {
     runInAction(() => {
       this.setIsScreenLoading(true)
     })
 
-    // NOTE: Prevents ws connection if stopScreenStreaming was called earlier
     if (this.disposed) {
       this.disposed = false
 
@@ -85,17 +100,47 @@ export class DeviceScreenStore {
     this.context = canvas.getContext('bitmaprenderer')
     this.canvasWrapper = canvasWrapper
 
-    this.connectWebsocket()
+    // Watch for display.url becoming available; trigger (re)connection when it appears
+    // while we're not already connected. This decouples the streaming WS lifecycle
+    // from a possibly-stale initial fetch.
+    this.urlReactionDisposer?.()
+    this.urlReactionDisposer = autorun(() => {
+      const session = this.deviceBySerialStore.session
+
+      if (session.silent && !session.ready) {
+        this.websocket?.close()
+
+        return
+      }
+
+      const url = this.deviceBySerialStore.deviceQueryResult().data?.display?.url
+
+      if (!url) return
+
+      if (this.disposed) return
+
+      if (this.websocket && this.websocket.readyState === WebSocket.OPEN) return
+
+      if (this.backoffPromise) return
+
+      this.connectWithBackoff()
+    })
   }
 
   stopScreenStreaming(): void {
     this.disposed = true
-    this.stopWebsocket()
+    this.backoffPromise = null
 
-    if (this.websocketReconnectionTimeoutID) {
-      clearTimeout(this.websocketReconnectionTimeoutID)
-      this.websocketReconnectionTimeoutID = null
+    this.urlReactionDisposer?.()
+    this.urlReactionDisposer = null
+
+    if (this.websocket) {
+      this.websocket.onclose = null
+      this.websocket.close()
+      this.websocket = null
     }
+
+    this.closeH264Decoder()
   }
 
   updateBounds(): void {
@@ -129,14 +174,10 @@ export class DeviceScreenStore {
 
   private shouldUpdateScreen(): boolean {
     return Boolean(
-      // NO if the user has disabled the screen.
       this.showScreen &&
-        // NO if the page is not visible (e.g. background tab).
         document.visibilityState === 'visible' &&
-        // NO if we don't have a connection yet.
         this.websocket &&
         this.websocket.readyState === WebSocket.OPEN
-      // YES otherwise
     )
   }
 
@@ -158,25 +199,35 @@ export class DeviceScreenStore {
     }
   }
 
+  /**
+   * Compute the bound size the minicap projection should be re-encoded to.
+   *
+   * If the native (framebuffer) dimensions are not yet known (banner / first frame
+   * haven't arrived), we send the raw wrapper size multiplied by density. minicap
+   * accepts arbitrary projections, and as soon as `nativeWidth`/`nativeHeight` are
+   * known the next call clamps to `minScale` of the native size.
+   *
+   * This function intentionally never throws so that the WS auth_success path
+   * and ResizeObserver callbacks remain side-effect-safe even when `device.display`
+   * is transiently undefined right after device introduction.
+   */
   private adjustBoundedSize(width: number, height: number): ElementBoundSize {
-    if (!this.device?.display?.width || !this.device?.display?.height) {
-      throw new Error('No display width or height')
-    }
-
-    const scaledWidth = this.device.display.width * this.options.minScale
-    const scaledHeight = this.device.display.height * this.options.minScale
-
     let sw = width * this.options.density
     let sh = height * this.options.density
 
-    if (sw < scaledWidth) {
-      sw *= scaledWidth / sw
-      sh *= scaledWidth / sh
-    }
+    if (this.hasNativeSize && this.nativeWidth > 0 && this.nativeHeight > 0) {
+      const scaledWidth = this.nativeWidth * this.options.minScale
+      const scaledHeight = this.nativeHeight * this.options.minScale
 
-    if (sh < scaledHeight) {
-      sw *= scaledHeight / sw
-      sh *= scaledHeight / sh
+      if (sw < scaledWidth) {
+        sw *= scaledWidth / sw
+        sh *= scaledWidth / sh
+      }
+
+      if (sh < scaledHeight) {
+        sw *= scaledHeight / sw
+        sh *= scaledHeight / sh
+      }
     }
 
     return {
@@ -201,6 +252,20 @@ export class DeviceScreenStore {
 
   private isRotated(): boolean {
     return this.screenRotation === 90 || this.screenRotation === 270
+  }
+
+  private setNativeSize(width: number, height: number): void {
+    if (!width || !height) return
+
+    if (this.isRotated()) {
+      this.nativeWidth = height
+      this.nativeHeight = width
+    } else {
+      this.nativeWidth = width
+      this.nativeHeight = height
+    }
+
+    this.hasNativeSize = true
   }
 
   private updateImageArea(imageWidth: number, imageHeight: number): void {
@@ -228,81 +293,207 @@ export class DeviceScreenStore {
       this.isScreenRotated = false
     }
 
+    if (!this.hasNativeSize) {
+      this.setNativeSize(imageWidth, imageHeight)
+
+      // Re-send a size message now that we know the native dimensions.
+      try {
+        this.updateBounds()
+      } catch {
+        /* canvasWrapper not yet set, harmless */
+      }
+    }
+
     this.determineAspectRatioMode()
   }
 
-  private connectWebsocket(): void {
-    if (!this.device?.display?.url) {
-      throw new Error('No display url')
-    }
+  private connectWebsocket(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (this.disposed || !this.deviceBySerialStore.session.ready) {
+        reject(new Error('Device session ended'))
 
-    if (!authStore.jwt) {
-      console.warn('No JWT token available in authStore')
-      throw new Error('Authentication token required')
-    }
+        return
+      }
 
-    // Pass JWT token securely via WebSocket subprotocol
-    this.websocket = new WebSocket(this.device.display.url, `access_token.${authStore.jwt}`)
+      const url = this.deviceBySerialStore.deviceQueryResult().data?.display?.url
 
-    this.websocket.binaryType = 'blob'
-    this.websocket.onopen = this.openListener.bind(this)
-    this.websocket.onmessage = this.messageListener.bind(this)
-    this.websocket.onerror = this.errorListener.bind(this)
-    this.websocket.onclose = this.closeListener.bind(this)
-  }
+      if (!url) {
+        reject(new Error('No display url'))
 
-  private stopWebsocket(): void {
-    if (this.websocket) {
-      this.websocket.close()
-      this.websocket = null
-    }
-  }
+        return
+      }
 
-  private reconnectWebsocket(): void {
-    // NOTE: No need reconnect if it is already in progress
-    if (this.websocketReconnecting || this.websocketReconnectionTimeoutID) return
+      if (!authStore.jwt) {
+        reject(new Error('Authentication token required'))
 
-    this.websocketReconnecting = true
-    this.websocketReconnectionAttempt += 1
-    this.connectWebsocket()
-  }
+        return
+      }
 
-  private openListener(): void {
-    if (this.websocketReconnecting) {
-      this.websocketReconnecting = false
-      this.websocketReconnectionAttempt = 0
-    }
+      const ws = new WebSocket(url, `access_token.${authStore.jwt}`)
 
-    this.isScreenStreamingJustStarted = true
-  }
+      ws.binaryType = 'arraybuffer'
 
-  private messageListener(message: MessageEvent<Blob | string>): void {
-    if (message.data instanceof Blob) {
-      createImageBitmap(message.data).then((image) => {
-        if (!this.context) {
-          throw new Error('Context is not set')
+      ws.onopen = (): void => {
+        if (this.disposed || !this.deviceBySerialStore.session.ready) {
+          ws.close()
+          reject(new Error('Device session ended'))
+
+          return
         }
 
-        if (this.isScreenStreamingJustStarted) {
-          this.updateImageArea(image.width, image.height)
+        this.websocket = ws
+        ws.onmessage = this.messageListener.bind(this)
+        ws.onerror = (): void => {}
 
-          this.setIsScreenLoading(false)
-          this.isScreenStreamingJustStarted = false
+        ws.onclose = this.handleUnexpectedClose.bind(this)
+
+        this.isScreenStreamingJustStarted = true
+        resolve()
+      }
+
+      ws.onerror = (): void => {}
+
+      ws.onclose = (event: CloseEvent): void => {
+        if (event.code === 1008) {
+          reject(new AuthError())
+
+          return
         }
 
-        this.context.transferFromImageBitmap(image)
+        reject(new Error(`WebSocket closed before opening: ${event.code}`))
+      }
+    })
+  }
+
+  private connectWithBackoff(): Promise<void> {
+    if (this.backoffPromise) return this.backoffPromise
+
+    this.backoffPromise = backOff(() => this.connectWebsocket(), {
+      numOfAttempts: 8,
+      startingDelay: 1000,
+      maxDelay: 16000,
+      jitter: 'full',
+      retry: (err) => {
+        if (this.disposed || !this.deviceBySerialStore.session.ready) return false
+
+        if (err instanceof AuthError) return false
+
+        return true
+      },
+    })
+      .catch((err) => {
+        if (this.disposed || !this.deviceBySerialStore.session.ready) return
+
+        runInAction(() => {
+          if (err instanceof AuthError) {
+            deviceErrorModalStore.setError(t('Unauthorized'))
+          } else {
+            deviceErrorModalStore.setError(t('Service is currently unavailable'))
+          }
+        })
       })
+      .finally(() => {
+        this.backoffPromise = null
+      })
+
+    return this.backoffPromise
+  }
+
+  private handleUnexpectedClose(event: CloseEvent): void {
+    this.websocket = null
+    this.closeH264Decoder()
+
+    runInAction(() => {
+      this.setIsScreenLoading(true)
+    })
+
+    if (event.code === 1008) {
+      deviceErrorModalStore.setError(t('Unauthorized'))
+
+      return
+    }
+
+    if (!event.wasClean && !this.disposed && this.deviceBySerialStore.session.ready) {
+      this.connectWithBackoff()
+    }
+  }
+
+  private renderImage(image: ImageBitmap): void {
+    if (!this.context) {
+      throw new Error('Context is not set')
+    }
+
+    if (this.isScreenStreamingJustStarted) {
+      this.updateImageArea(image.width, image.height)
+
+      this.setIsScreenLoading(false)
+      this.isScreenStreamingJustStarted = false
+    }
+
+    this.context.transferFromImageBitmap(image)
+  }
+
+  /* Draws the latest decoded frame on the next animation frame */
+  private onDecodedFrame(frame: VideoFrame): void {
+    const scheduled = this.pendingFrame !== null
+
+    this.pendingFrame?.close()
+    this.pendingFrame = frame
+
+    if (scheduled) return
+
+    requestAnimationFrame(() => {
+      const latest = this.pendingFrame
+
+      this.pendingFrame = null
+
+      if (!latest) return
+
+      createImageBitmap(latest)
+        .then((image) => this.renderImage(image))
+        .finally(() => latest.close())
+    })
+  }
+
+  private startH264Decoder(): void {
+    if (this.h264Decoder) return
+
+    if (!H264ScreenDecoder.isSupported()) {
+      deviceErrorModalStore.setError(t('This browser cannot play the device screen'))
+
+      return
+    }
+
+    this.h264Decoder = new H264ScreenDecoder(
+      (frame) => this.onDecodedFrame(frame),
+      (error) => console.warn('Screen decoder error, waiting for the next key frame:', error)
+    )
+  }
+
+  private closeH264Decoder(): void {
+    this.h264Decoder?.close()
+    this.h264Decoder = null
+    this.pendingFrame?.close()
+    this.pendingFrame = null
+  }
+
+  private messageListener(message: MessageEvent<ArrayBuffer | string>): void {
+    if (message.data instanceof ArrayBuffer) {
+      if (this.h264Decoder) {
+        this.h264Decoder.push(message.data)
+
+        return
+      }
+
+      createImageBitmap(new Blob([message.data])).then((image) => this.renderImage(image))
 
       return
     }
 
     if (message.data === 'secure_on') {
-      // NOTE: The current view is marked secure and cannot be viewed remotely
-
       return
     }
 
-    // Handle authentication messages
     if (typeof message.data === 'string') {
       try {
         const authMessage = JSON.parse(message.data)
@@ -311,8 +502,16 @@ export class DeviceScreenStore {
           console.info('WebSocket authentication successful')
 
           if (this.shouldUpdateScreen()) {
-            this.updateBounds()
+            // IMPORTANT: signal interest first so the server emits the `start` banner.
+            // The banner contains real device-side dimensions, after which a
+            // subsequent updateBounds() will apply the correct minScale floor.
             this.onScreenInterestGained()
+
+            try {
+              this.updateBounds()
+            } catch (err) {
+              console.warn('updateBounds skipped:', err)
+            }
 
             return
           }
@@ -334,38 +533,40 @@ export class DeviceScreenStore {
 
     const startRegex = /^start /
 
-    if (startRegex.test(message.data)) {
-      const startData: StartScreenStreamingMessage = JSON.parse(message.data.replace(startRegex, ''))
+    if (startRegex.test(message.data as string)) {
+      const payload = (message.data as string).replace(startRegex, '')
+      let startData: StartScreenStreamingMessage | null = null
+
+      try {
+        startData = JSON.parse(payload) as StartScreenStreamingMessage | null
+      } catch {
+        startData = null
+      }
 
       this.isScreenStreamingJustStarted = true
 
-      this.screenRotation = startData.orientation
-    }
-  }
+      if (startData?.codec === 'h264') {
+        this.startH264Decoder()
+      } else {
+        this.closeH264Decoder()
+      }
 
-  private errorListener(): void {}
+      if (startData) {
+        this.screenRotation = startData.orientation ?? this.screenRotation
 
-  private closeListener(event: CloseEvent): void {
-    this.setIsScreenLoading(true)
-    this.websocketReconnecting = false
+        const sourceWidth = startData.realWidth || startData.virtualWidth || 0
+        const sourceHeight = startData.realHeight || startData.virtualHeight || 0
 
-    if (event.code === 1008) {
-      deviceErrorModalStore.setError(t('Unauthorized'))
+        if (sourceWidth && sourceHeight) {
+          this.setNativeSize(sourceWidth, sourceHeight)
 
-      return
-    }
-
-    if (!event.wasClean && this.websocketReconnectionAttempt < this.websocketReconnectionMaxAttempts) {
-      this.websocketReconnectionTimeoutID = setTimeout(() => {
-        this.websocketReconnectionTimeoutID = null
-        this.reconnectWebsocket()
-      }, this.websocketReconnectionInterval)
-
-      return
-    }
-
-    if (this.websocketReconnectionAttempt >= this.websocketReconnectionMaxAttempts) {
-      deviceErrorModalStore.setError(t('Service is currently unavailable'))
+          try {
+            this.updateBounds()
+          } catch {
+            /* empty */
+          }
+        }
+      }
     }
   }
 }

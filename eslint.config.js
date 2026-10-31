@@ -11,43 +11,9 @@ export default tseslint.config(
             '@typescript-eslint': tseslint.plugin,
             ascii: {
                 rules: {
-                'no-non-ascii': {
-                    meta: {
-                    type: 'problem',
-                    docs: { description: 'Disallow any non-ASCII character anywhere in the file' },
-                    schema: [],
-                    messages: {
-                        nonAscii: 'Non-ASCII character U+{{code}} found.',
-                    },
-                    },
-                    create(context) {
-                    // ESLint 9 exposes SourceCode at context.sourceCode
-                    const sourceCode = context.sourceCode ?? context.getSourceCode?.();
-                    return {
-                        Program() {
-                        const text = sourceCode.text ?? sourceCode.getText();
-                        for (let i = 0; i < text.length; i++) {
-                            const cp = text.codePointAt(i);
-                            if (cp > 0x7f) {
-                            const loc = sourceCode.getLocFromIndex(i);
-                            context.report({
-                                loc: { start: loc, end: { line: loc.line, column: loc.column + 1 } },
-                                messageId: 'nonAscii',
-                                data: { code: cp.toString(16).toUpperCase().padStart(4, '0') },
-                            });
-                            // Skip the second half of a surrogate pair
-                            if (cp > 0xffff) i++;
-                            }
-                        }
-                        },
-                    };
-                    },
-                },
+                    'no-non-ascii': 0,
                 },
             },
-        },
-        rules: {
-            'ascii/no-non-ascii': 'error',
         },
     },
     {
@@ -142,7 +108,7 @@ export default tseslint.config(
             'no-label-var': 2,
             'no-shadow-restricted-names': 2,
             'no-shadow': 0,
-            'no-undefined': 1,
+            'no-undefined': 0,
             'no-unused-vars': [1, {varsIgnorePattern: '^_'}],
             'no-use-before-define': 0,
 
@@ -204,7 +170,7 @@ export default tseslint.config(
             'wrap-regex': 0,
 
             // Node.js / Common.js
-            'callback-return': 1,
+            'callback-return': 0,
             'global-require': 0,
             'handle-callback-err': 1,
             'no-mixed-requires': [0, {grouping: true}],

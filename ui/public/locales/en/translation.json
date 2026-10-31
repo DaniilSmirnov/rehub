@@ -1,5 +1,5 @@
 {
-  "A new version of STF is available": "A new version of VK DeviceHub is available",
+  "A new version of STF is available": "A new version of reHub is available",
   "A package is already installed with the same name.": "A package is already installed with the same name.",
   "A previously installed package of the same name has a different signature than the new package (and the old package's data was not removed).": "A previously installed package of the same name has a different signature than the new package (and the old package's data was not removed).",
   "A secure container mount point couldn't be accessed on external media.": "A secure container mount point couldn't be accessed on external media.",
@@ -260,6 +260,7 @@
   "The package archive file is invalid.": "The package archive file is invalid.",
   "The package being installed contains native code, but none that is compatible with the device's CPU_ABI.": "The package being installed contains native code, but none that is compatible with the device's CPU_ABI.",
   "The package is already installed.": "The package is already installed.",
+  "This browser cannot play the device screen": "This browser cannot play the device screen: it needs WebCodecs support. Use a recent Chrome, Edge, Safari or Firefox over HTTPS",
   "Tip:": "Tip:",
   "Title": "Title",
   "Total Devices": "Total Devices",
@@ -469,5 +470,19 @@
   "Moderator": "Moderator",
   "Make Moderator": "Make Moderator",
   "Remove Moderator": "Remove Moderator",
-  "Group privilege": "Group privilege"
+  "Group privilege": "Group privilege",
+  "Optional. If you add keys, only their owners can connect via adb connect. Without keys, anyone with the command can connect.": "Optional. If you add keys, only their owners can connect via adb connect. Without keys, anyone with the command can connect.",
+  "Lifetime": "Lifetime",
+  "No expiration": "No expiration",
+  "1 month": "1 month",
+  "2 months": "2 months",
+  "3 months": "3 months",
+  "Expires on {{date}}": "Expires on {{date}}",
+  "Never expires": "Never expires",
+  "Watch": "Watch",
+  "Connecting…": "Connecting…",
+  "View only": "View only",
+  "Automation finished": "Automation finished",
+  "This device is not under automation": "This device is not under automation",
+  "Screen disconnected": "Screen disconnected"
 }
