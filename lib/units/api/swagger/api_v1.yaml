@@ -3474,6 +3474,33 @@ paths:
                 $ref: '#/components/schemas/UnexpectedErrorResponse'
       x-codegen-request-body-name: serial
     x-swagger-router-controller: autotests
+  /metrics:
+    get:
+      tags:
+        - admin
+        - metrics
+      summary: Gets Prometheus metrics
+      description: Device, provider, user and group counts plus process metrics, in the
+        Prometheus text format. Reserved to administrators.
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Metrics in the Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: |
+            Unexpected Error:
+              * 401: Unauthorized => bad credentials
+              * 403: Forbidden => not an administrator
+              * 500: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnexpectedErrorResponse'
+    x-swagger-router-controller: metrics
   /stats:
     post:
       tags:
