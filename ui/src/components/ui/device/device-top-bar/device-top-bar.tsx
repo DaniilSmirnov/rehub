@@ -12,6 +12,7 @@ import { ConditionalRender } from '@/components/lib/conditional-render'
 import { ScreenQualitySelector } from '@/components/ui/screen-quality-selector'
 
 import { CONTAINER_IDS } from '@/config/inversify/container-ids'
+import { usePageTitle } from '@/lib/hooks/use-page-title.hook'
 
 import { getMainRoute } from '@/constants/route-paths'
 
@@ -32,6 +33,8 @@ export const DeviceTopBar = observer(() => {
   const deviceTitle =
     device?.platform === 'Android' ? `${device?.manufacturer || ''} ${device?.marketName || ''}` : device?.model || ''
   const currentRotation = `${t('Current rotation:')} ${deviceScreenStore.getScreenRotation}°`
+
+  usePageTitle(deviceTitle)
 
   useEffect(() => {
     const onPopState = () => {

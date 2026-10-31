@@ -36,6 +36,7 @@ import {Any} from '../../wire/google/protobuf/any.js'
 import {ProcessorRouting} from './routing.js'
 import {PresenceTracker, type PresenceEvent} from './presence.js'
 import {SilentDevices} from './silent-devices.js'
+import {storeAdbPublicKey} from './adb-public-key.js'
 import {
     UserChangeMessage,
     GroupChangeMessage,
@@ -58,6 +59,7 @@ import {
     DeviceStatusMessage,
     DeviceReadyMessage,
     JoinGroupByAdbFingerprintMessage,
+    AdbPublicKeyMessage,
     JoinGroupByVncAuthResponseMessage,
     ConnectStartedMessage,
     ConnectStoppedMessage,
@@ -450,6 +452,15 @@ export default db.ensureConnectivity(async(options: Options) => {
             sendToApp(wireutil.pack(JoinGroupByAdbFingerprintMessage, message))
         } catch (err: any) {
             log.error('Unable to lookup user by ADB fingerprint "%s": %s', message.fingerprint, err?.message)
+        }
+    })
+    on(AdbPublicKeyMessage, async (_ctx, message) => {
+        try {
+            if (await storeAdbPublicKey(UserModel, message)) {
+                log.info('Stored the ADB public key "%s" of "%s"', message.fingerprint, message.email)
+            }
+        } catch (err: any) {
+            log.warn('Unable to store ADB public key "%s": %s', message.fingerprint, err?.message)
         }
     })
     on(JoinGroupByVncAuthResponseMessage, async (ctx, message) => {

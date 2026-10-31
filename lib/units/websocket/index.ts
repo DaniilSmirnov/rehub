@@ -67,6 +67,7 @@ import {
 } from '../../wire/wire.js'
 import AllModel from '../../db/models/all/index.js'
 import UserModel from '../../db/models/user/index.js'
+import {encodePublicKey, ownerAdbKeys} from '../../util/adbkeyutil.js'
 import type {MessageType} from '@protobuf-ts/runtime'
 
 interface Options {
@@ -608,7 +609,8 @@ export default (async (options: Options) => {
                     const key = await Adb.util.parsePublicKey(data.key)
                     const added = await UserModel.insertUserAdbKey(user.email, {
                         title: data.title,
-                        fingerprint: key.fingerprint
+                        fingerprint: key.fingerprint,
+                        publicKey: encodePublicKey(key)
                     })
                     if (!added) {
                         socket.emit('user.keys.adb.error', {message: 'Key was already added'})
@@ -655,12 +657,20 @@ export default (async (options: Options) => {
                 run: runTx,
                 acquire: async (serial, rc, data) => {
                     try {
+                        // The device takes over on any GroupMessage: only an admin may
+                        // take a device that another user is holding
+                        const device = await dbapi.loadDeviceBySerial(serial)
+                        const ownerEmail = device?.owner?.email
+                        if (ownerEmail && ownerEmail !== user.email && user.privilege !== apiutil.ADMIN) {
+                            socket.emit('tx.done', rc, {source: serial, success: false, data: 'device_in_use'})
+                            return
+                        }
                         const keys = await UserModel.getUserAdbKeys(user.email)
                         await runTx(serial, rc, GroupMessage, {
                             owner: {email: user.email, name: user.name, group: user.group},
                             timeout: data.timeout || undefined,
                             requirements: wireutil.toDeviceRequirements(data.requirements),
-                            keys: keys.map((key: {fingerprint: string}) => key.fingerprint)
+                            ...ownerAdbKeys(keys)
                         }, {requireOwned: false})
                     }
                     catch (err: any) {

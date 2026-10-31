@@ -4,9 +4,9 @@ import { isSamePath } from './is-same-path.util'
 
 describe('isSamePath util', () => {
   it('matches a silent control route opened by an unencoded link', () => {
-    expect(isSamePath('/silent-control/my provider/127.0.0.1:5557', getControlRoute('127.0.0.1:5557', 'my provider'))).toBe(
-      true
-    )
+    expect(
+      isSamePath('/silent-control/my provider/127.0.0.1:5557', getControlRoute('127.0.0.1:5557', 'my provider'))
+    ).toBe(true)
   })
 
   it('matches differently encoded segments', () => {

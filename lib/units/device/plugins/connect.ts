@@ -14,6 +14,11 @@ import data from './util/data.js'
 import minirev from '../resources/minirev.js'
 import type TcpUsbServer from '@u4/adbkit/dist/adb/tcpusb/server.d.ts'
 import {attachReverse, type ReverseSession} from './adb-reverse/session.ts'
+import {Adb} from '@u4/adbkit'
+import type ExtendedPublicKey from '@u4/adbkit/dist/models/ExtendedPublicKey.d.ts'
+import wireutil from '../../../wire/util.js'
+import {AdbPublicKeyMessage} from '../../../wire/wire.js'
+import {encodePublicKey} from '../../../util/adbkeyutil.js'
 
 interface Key {
     fingerprint: string
@@ -34,6 +39,13 @@ export default syrup.serial()
         const log = logger.createLogger('device:plugins:connect')
         let activeServer: TcpUsbServer | null = null
         const activeSessions = new Set<ReverseSession>()
+        // The owner's full adb public keys. A signature made with one of them is accepted at once,
+        // the way a device accepts a key in its adb_keys, so the adb client reports "connected"
+        // instead of falling back to sending its public key and reporting "failed to authenticate".
+        // The bridge reads this array on every signature, so it is only ever changed in place. It
+        // holds nothing but the current owner's keys and is emptied when the owner leaves.
+        const knownKeys: ExtendedPublicKey[] = []
+        let owner: {email: string, keys: string[]} | null = null
         // Set to true before deliberate minirev kill so the stream-end
         // listener doesn't trigger lifecycle.fatal().
         let stoppingMinirev = false
@@ -93,7 +105,7 @@ export default syrup.serial()
                         if (!plugin.auth(key)) throw new Error('ADB key is not allowed for the current owner')
                     }
 
-                    activeServer = adb.createTcpUsbBridge(plugin.serial, {auth})
+                    activeServer = adb.createTcpUsbBridge(plugin.serial, {auth, knownPublicKeys: knownKeys})
                         .on('listening', () => resolve(plugin.url))
                         .on('error', err => {
                             log.warn('Remote ADB bridge error: %s', err.message)
@@ -161,16 +173,72 @@ export default syrup.serial()
             }
         }
 
-        const setAllowedKeys = (keys: string[] = []) => {
+        const addKnownKey = (key: ExtendedPublicKey) => {
+            if (!knownKeys.some(known => known.fingerprint === key.fingerprint)) {
+                knownKeys.push(key)
+            }
+        }
+
+        // A key the owner added by its fingerprint alone: send the full key along to be stored, so
+        // that the next connection is accepted on its signature
+        const reportPublicKey = (key: ExtendedPublicKey) => {
+            if (!owner?.keys.includes(key.fingerprint)) {
+                return
+            }
+            try {
+                transport.send([
+                    wireutil.global,
+                    wireutil.pack(AdbPublicKeyMessage, {
+                        serial: options.serial,
+                        email: owner.email,
+                        fingerprint: key.fingerprint,
+                        publicKey: encodePublicKey(key)
+                    })
+                ])
+            }
+            catch (err: any) {
+                log.warn('Unable to report ADB public key "%s": %s', key.fingerprint, err?.message)
+            }
+        }
+
+        // Only the full keys of the owner's own fingerprints count
+        const setKnownKeys = async(keys: string[], publicKeys: string[]) => {
+            const parsed = await Promise.all(publicKeys.map(async publicKey => {
+                try {
+                    return await Adb.util.parsePublicKey(publicKey)
+                }
+                catch (err: any) {
+                    log.warn('Ignoring unparseable ADB public key: %s', err?.message)
+                    return null
+                }
+            }))
+            knownKeys.length = 0
+            for (const key of parsed) {
+                if (key && keys.includes(key.fingerprint)) {
+                    addKnownKey(key)
+                }
+            }
+        }
+
+        const setAllowedKeys = (email: string | undefined, keys: string[] = [], publicKeys: string[] = []) => {
+            owner = email ? {email, keys} : null
+            knownKeys.length = 0
             plugin.auth = key => {
                 if (keys.length && !keys.includes(key.fingerprint)) {
                     log.warn('Remote ADB key is not allowed for the current owner')
                     return false
                 }
+                const extended = key as ExtendedPublicKey
+                if ('n' in extended && !knownKeys.some(known => known.fingerprint === key.fingerprint)) {
+                    reportPublicKey(extended)
+                    // Later connections in this session go through without the round trip
+                    addKnownKey(extended)
+                }
                 return true
             }
+            return setKnownKeys(keys, publicKeys)
         }
-        group.on('join', e => setAllowedKeys(e.adbKeys))
+        group.on('join', e => setAllowedKeys(e.owner?.email, e.adbKeys, e.adbPublicKeys))
 
         group.on('leave', () => {
             for (const session of activeSessions) {
@@ -190,6 +258,8 @@ export default syrup.serial()
         lifecycle.observe(() => connector.stop())
         group.on('leave', () => {
             plugin.auth = (key) => false
+            owner = null
+            knownKeys.length = 0
             return connector.stop()
         })
     })
