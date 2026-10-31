@@ -84,6 +84,12 @@ export interface SilentActor {
      * @generated from protobuf field: repeated string adbKeys = 4
      */
     adbKeys: string[];
+    /**
+     * Full keys in the ~/.android/adbkey.pub format, for the ones that have one stored
+     *
+     * @generated from protobuf field: repeated string adbPublicKeys = 5
+     */
+    adbPublicKeys: string[];
 }
 /**
  * @generated from protobuf message DescribeSilentDevice
@@ -1358,6 +1364,12 @@ export interface GroupMessage {
      * @generated from protobuf field: repeated string keys = 5
      */
     keys: string[];
+    /**
+     * Full keys in the ~/.android/adbkey.pub format, for the ones that have one stored
+     *
+     * @generated from protobuf field: repeated string publicKeys = 6
+     */
+    publicKeys: string[];
 }
 /**
  * @generated from protobuf message AutoGroupMessage
@@ -1444,6 +1456,29 @@ export interface JoinGroupByVncAuthResponseMessage {
  * @generated from protobuf message AdbKeysUpdatedMessage
  */
 export interface AdbKeysUpdatedMessage {
+}
+/**
+ * A device accepted the owner's key by its fingerprint: the full key, to store for next time
+ *
+ * @generated from protobuf message AdbPublicKeyMessage
+ */
+export interface AdbPublicKeyMessage {
+    /**
+     * @generated from protobuf field: required string serial = 1
+     */
+    serial: string;
+    /**
+     * @generated from protobuf field: required string email = 2
+     */
+    email: string;
+    /**
+     * @generated from protobuf field: required string fingerprint = 3
+     */
+    fingerprint: string;
+    /**
+     * @generated from protobuf field: required string publicKey = 4
+     */
+    publicKey: string;
 }
 /**
  * @generated from protobuf message VncAuthResponsesUpdatedMessage
@@ -2847,7 +2882,8 @@ class SilentActor$Type extends MessageType<SilentActor> {
             { no: 1, name: "email", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "group", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "adbKeys", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ }
+            { no: 4, name: "adbKeys", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "adbPublicKeys", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<SilentActor>): SilentActor {
@@ -2856,6 +2892,7 @@ class SilentActor$Type extends MessageType<SilentActor> {
         message.name = "";
         message.group = "";
         message.adbKeys = [];
+        message.adbPublicKeys = [];
         if (value !== undefined)
             reflectionMergePartial<SilentActor>(this, message, value);
         return message;
@@ -2876,6 +2913,9 @@ class SilentActor$Type extends MessageType<SilentActor> {
                     break;
                 case /* repeated string adbKeys */ 4:
                     message.adbKeys.push(reader.string());
+                    break;
+                case /* repeated string adbPublicKeys */ 5:
+                    message.adbPublicKeys.push(reader.string());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -2901,6 +2941,9 @@ class SilentActor$Type extends MessageType<SilentActor> {
         /* repeated string adbKeys = 4; */
         for (let i = 0; i < message.adbKeys.length; i++)
             writer.tag(4, WireType.LengthDelimited).string(message.adbKeys[i]);
+        /* repeated string adbPublicKeys = 5; */
+        for (let i = 0; i < message.adbPublicKeys.length; i++)
+            writer.tag(5, WireType.LengthDelimited).string(message.adbPublicKeys[i]);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7231,13 +7274,15 @@ class GroupMessage$Type extends MessageType<GroupMessage> {
             { no: 2, name: "timeout", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
             { no: 3, name: "requirements", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => DeviceRequirement },
             { no: 4, name: "usage", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 5, name: "keys", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ }
+            { no: 5, name: "keys", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "publicKeys", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<GroupMessage>): GroupMessage {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.requirements = [];
         message.keys = [];
+        message.publicKeys = [];
         if (value !== undefined)
             reflectionMergePartial<GroupMessage>(this, message, value);
         return message;
@@ -7261,6 +7306,9 @@ class GroupMessage$Type extends MessageType<GroupMessage> {
                     break;
                 case /* repeated string keys */ 5:
                     message.keys.push(reader.string());
+                    break;
+                case /* repeated string publicKeys */ 6:
+                    message.publicKeys.push(reader.string());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -7289,6 +7337,9 @@ class GroupMessage$Type extends MessageType<GroupMessage> {
         /* repeated string keys = 5; */
         for (let i = 0; i < message.keys.length; i++)
             writer.tag(5, WireType.LengthDelimited).string(message.keys[i]);
+        /* repeated string publicKeys = 6; */
+        for (let i = 0; i < message.publicKeys.length; i++)
+            writer.tag(6, WireType.LengthDelimited).string(message.publicKeys[i]);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7637,6 +7688,77 @@ class AdbKeysUpdatedMessage$Type extends MessageType<AdbKeysUpdatedMessage> {
  * @generated MessageType for protobuf message AdbKeysUpdatedMessage
  */
 export const AdbKeysUpdatedMessage = new AdbKeysUpdatedMessage$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AdbPublicKeyMessage$Type extends MessageType<AdbPublicKeyMessage> {
+    constructor() {
+        super("AdbPublicKeyMessage", [
+            { no: 1, name: "serial", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "email", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "fingerprint", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "publicKey", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AdbPublicKeyMessage>): AdbPublicKeyMessage {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.serial = "";
+        message.email = "";
+        message.fingerprint = "";
+        message.publicKey = "";
+        if (value !== undefined)
+            reflectionMergePartial<AdbPublicKeyMessage>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AdbPublicKeyMessage): AdbPublicKeyMessage {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* required string serial */ 1:
+                    message.serial = reader.string();
+                    break;
+                case /* required string email */ 2:
+                    message.email = reader.string();
+                    break;
+                case /* required string fingerprint */ 3:
+                    message.fingerprint = reader.string();
+                    break;
+                case /* required string publicKey */ 4:
+                    message.publicKey = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AdbPublicKeyMessage, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* required string serial = 1; */
+        if (message.serial !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.serial);
+        /* required string email = 2; */
+        if (message.email !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.email);
+        /* required string fingerprint = 3; */
+        if (message.fingerprint !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.fingerprint);
+        /* required string publicKey = 4; */
+        if (message.publicKey !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.publicKey);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AdbPublicKeyMessage
+ */
+export const AdbPublicKeyMessage = new AdbPublicKeyMessage$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class VncAuthResponsesUpdatedMessage$Type extends MessageType<VncAuthResponsesUpdatedMessage> {
     constructor() {

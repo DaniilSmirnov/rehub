@@ -12,7 +12,7 @@ describe('GET silent-devices/provider/serial', () => {
         await getSilentDevice(req, res)
         expect(runTransaction).toHaveBeenCalledTimes(1)
         expect(runTransaction).toHaveBeenCalledWith('p2', 'same', DescribeSilentDevice, {
-            actor: {...req.user, adbKeys: []}
+            actor: {...req.user, adbKeys: [], adbPublicKeys: []}
         }, {timeout: 10_000})
         expect(res.json).toHaveBeenCalledWith({success: true, device})
     })
