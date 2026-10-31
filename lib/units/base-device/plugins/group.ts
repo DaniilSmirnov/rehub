@@ -42,6 +42,7 @@ interface GroupEvents {
 
 export class GroupManager extends EventEmitter<GroupEvents> {
     private currentOwner: OwnerState | null = null
+    private currentUsage: string | null = null
 
     constructor(private inactivity: InactivityMonitor) { super() }
 
@@ -52,6 +53,7 @@ export class GroupManager extends EventEmitter<GroupEvents> {
     async joinExclusive(owner: OwnerState, adbKeys: ADBKey[], timeout: number, adbPublicKeys: string[] = []) {
         if (this.currentOwner) throw new Error('busy')
         this.currentOwner = owner
+        this.currentUsage = 'debug'
         const event = {owner, adbKeys, adbPublicKeys, timeout, usage: 'debug'}
         const results = await Promise.allSettled(this.rawListeners('join').map(listener => Promise.resolve().then(() => listener.call(this, event))))
         const failed = results.find(result => result.status === 'rejected')
@@ -62,6 +64,7 @@ export class GroupManager extends EventEmitter<GroupEvents> {
     async leaveExclusive(reason: string) {
         const owner = this.currentOwner
         this.currentOwner = null
+        this.currentUsage = null
         this.inactivity.stop()
 
         if (!owner) {
@@ -79,6 +82,11 @@ export class GroupManager extends EventEmitter<GroupEvents> {
         if (failed?.status === 'rejected') {
             throw failed.reason
         }
+    }
+
+    // The current lease, or null when the device is free
+    lease(): {email: string, usage: string | null} | null {
+        return this.currentOwner ? {email: this.currentOwner.email, usage: this.currentUsage} : null
     }
 
     async get() {
@@ -106,6 +114,7 @@ export class GroupManager extends EventEmitter<GroupEvents> {
             }
 
             this.currentOwner = owner
+            this.currentUsage = usage || null
             this.inactivity.start(timeout, () => {
                 this.leave('automatic_timeout')
                 this.emit('timeout')
@@ -133,6 +142,7 @@ export class GroupManager extends EventEmitter<GroupEvents> {
         }
 
         this.currentOwner = null
+        this.currentUsage = null
         return null
     }
 

@@ -1,0 +1,12 @@
+.status {
+  padding: 0 16px 12px;
+  color: var(--vkui--color_text_secondary);
+}
+
+.screen {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 160px);
+  margin: 0 auto;
+  object-fit: contain;
+}

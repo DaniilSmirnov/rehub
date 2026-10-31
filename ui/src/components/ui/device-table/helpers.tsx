@@ -38,6 +38,7 @@ const DEVICE_STATE_ORDER: Record<DeviceState, number> = {
   automation: 15,
   available: 20,
   busy: 30,
+  automated: 30,
   preparing: 50,
   unauthorized: 60,
   offline: 70,

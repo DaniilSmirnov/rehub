@@ -478,5 +478,11 @@
   "2 months": "2 months",
   "3 months": "3 months",
   "Expires on {{date}}": "Expires on {{date}}",
-  "Never expires": "Never expires"
+  "Never expires": "Never expires",
+  "Watch": "Watch",
+  "Connecting…": "Connecting…",
+  "View only": "View only",
+  "Automation finished": "Automation finished",
+  "This device is not under automation": "This device is not under automation",
+  "Screen disconnected": "Screen disconnected"
 }

@@ -52,7 +52,8 @@ export class DeviceListStore {
 
   get busyDevicesCount(): number | undefined {
     return this.devicesQuery.data?.reduce(
-      (accumulator, item) => (getDeviceState(item) === DeviceState.BUSY ? accumulator + 1 : accumulator),
+      (accumulator, item) =>
+        [DeviceState.BUSY, DeviceState.AUTOMATED].includes(getDeviceState(item)) ? accumulator + 1 : accumulator,
       0
     )
   }

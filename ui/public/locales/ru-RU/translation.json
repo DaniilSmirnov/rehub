@@ -483,5 +483,11 @@
   "2 months": "2 месяца",
   "3 months": "3 месяца",
   "Expires on {{date}}": "Действует до {{date}}",
-  "Never expires": "Бессрочный"
+  "Never expires": "Бессрочный",
+  "Watch": "Смотреть",
+  "Connecting…": "Подключение…",
+  "View only": "Только просмотр",
+  "Automation finished": "Автоматизация завершена",
+  "This device is not under automation": "Устройство не под автоматизацией",
+  "Screen disconnected": "Экран отключён"
 }
