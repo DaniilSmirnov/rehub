@@ -36,7 +36,9 @@ import {Any} from '../../wire/google/protobuf/any.js'
 import {ProcessorRouting} from './routing.js'
 import {PresenceTracker, type PresenceEvent} from './presence.js'
 import {SilentDevices} from './silent-devices.js'
+import {restoreDeviceOwner} from './owner-restore.js'
 import {storeAdbPublicKey} from './adb-public-key.js'
+import {ownerAdbKeys} from '../../util/adbkeyutil.js'
 import {
     UserChangeMessage,
     GroupChangeMessage,
@@ -65,6 +67,7 @@ import {
     ConnectStoppedMessage,
     JoinGroupMessage,
     LeaveGroupMessage,
+    GroupMessage,
     DeviceIdentityMessage,
     AirplaneModeEvent,
     BatteryEvent,
@@ -99,6 +102,8 @@ interface Options {
     }
     heartbeatTimeout: number
     publicIp: string
+    // Hand a device that disappeared while in use back to its owner when it returns
+    autoRestoreOwner?: boolean
 }
 
 // wireutil.pack/envelope return a Uint8Array; the ZMQ layer wants Buffer.
@@ -132,6 +137,22 @@ export default db.ensureConnectivity(async(options: Options) => {
     }
 
     await db.connect()
+
+    // Fleet-wide policy set per process: a fleet whose processors disagree restores an arbitrary
+    // subset of departures, so it is logged where it can be checked
+    log.info('Automatic owner restore is %s', options.autoRestoreOwner ? 'on' : 'off')
+
+    // Off by default: a device that disappears releases its owner. Turned on, every departure of a
+    // device in use is treated as a reboot it will come back from.
+    const reserveOwner = async (serial: string) => {
+        if (!options.autoRestoreOwner) return
+        try {
+            await dbapi.reserveDeviceOwner(serial)
+        }
+        catch (err: any) {
+            log.error('Unable to reserve the owner of device "%s": %s', serial, err?.message)
+        }
+    }
 
     const routing = new ProcessorRouting()
     const presence = new PresenceTracker(options.heartbeatTimeout)
@@ -260,7 +281,7 @@ export default db.ensureConnectivity(async(options: Options) => {
         log.info('Reaping device "%s" due to heartbeat timeout', event.serial)
 
         const now = Date.now()
-        dbapi.setDeviceAbsent(event.serial, now)
+        reserveOwner(event.serial).then(() => dbapi.setDeviceAbsent(event.serial, now))
         sendToApp(wireutil.pack(DeviceAbsentMessage, {serial: event.serial, presenceChangedAt: now}))
     })
 
@@ -427,6 +448,7 @@ export default db.ensureConnectivity(async(options: Options) => {
         sendToApp(ctx.data)
     })
     on(DeviceAbsentMessage, async (ctx, message) => {
+        await reserveOwner(message.serial)
         await dbapi.setDeviceAbsent(message.serial, message.presenceChangedAt)
         sendToApp(ctx.data)
     })
@@ -435,8 +457,22 @@ export default db.ensureConnectivity(async(options: Options) => {
         sendToApp(ctx.data)
     })
     on(DeviceReadyMessage, async (ctx, message) => {
-        await dbapi.setDeviceReady(message.serial, message.channel)
+        const device = await dbapi.setDeviceReady(message.serial, message.channel)
         ctx.sendToDevice(wireutil.envelope(new wire.ProbeMessage()))
+        // Settled before the device is announced, so it is never offered to anyone else first
+        await restoreDeviceOwner(device, {
+            loadUser: email => UserModel.loadUser(email) as Promise<any>,
+            clearClaim: serial => dbapi.clearDeviceRestoreOwner(serial),
+            join: (user, claim) => ctx.sendToDevice(wireutil.pack(GroupMessage, {
+                owner: {email: user.email, name: user.name, group: user.group},
+                timeout: claim.timeout || undefined,
+                usage: claim.usage || undefined,
+                requirements: [],
+                ...ownerAdbKeys(user.adbKeys)
+            })),
+            log
+        }).catch((err: any) =>
+            log.error('Unable to restore the owner of device "%s": %s', message.serial, err?.message))
         sendToApp(ctx.data)
     })
     on(JoinGroupByAdbFingerprintMessage, async (ctx, message) => {
@@ -498,6 +534,11 @@ export default db.ensureConnectivity(async(options: Options) => {
         sendToApp(ctx.data)
     })
     on(LeaveGroupMessage, async (ctx, message) => {
+        // A worker shutting down because its device went away leaves first; keep the claim before
+        // the owner is cleared
+        if (message.reason === 'device_absent') {
+            await reserveOwner(message.serial)
+        }
         await Promise.all([
             dbapi.setDeviceState(message.serial, {owner: null, usage: null, timeout: 0}),
             dbapi.sendEvent('device_leave'
