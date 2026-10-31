@@ -1,5 +1,5 @@
 import { expect, Locator, Page } from '@playwright/test'
-import { getCanvasImageData } from '../../helpers/utils/canvas'
+import { getCanvasImageData, isCanvasBlank } from '../../helpers/utils/canvas'
 
 export class DeviceHubDeviceScreenPage {
     readonly page: Page
@@ -41,6 +41,11 @@ export class DeviceHubDeviceScreenPage {
         await expect(this.stopButton).toBeVisible()
         await expect(this.deviceScreen).toBeVisible()
         await expect(this.deviceCanvas).toBeVisible()
+    }
+
+    // The stream starts after the page shows up: wait for its first frame
+    async waitForFirstFrame() {
+        await expect.poll(() => isCanvasBlank(this.deviceCanvas), { timeout: 30000 }).toBe(false)
     }
 
     async getDeviceScreen() {

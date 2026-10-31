@@ -171,7 +171,7 @@ export default syrup.serial()
         })
 
         plugin.on('leave', (owner, reason) => {
-            log.important('No longer owned by "%s"', owner.email)
+            log.important('No longer owned by "%s" (reason: %s)', owner.email, reason)
 
             transport.send([
                 wireutil.global,
