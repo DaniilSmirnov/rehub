@@ -317,6 +317,7 @@ ExecStart=/usr/bin/docker run --rm \
   -e "SAML_ID_PROVIDER_ENTRY_POINT_URL=YOUR_ID_PROVIDER_ENTRY_POINT" \
   -e "SAML_ID_PROVIDER_ISSUER=YOUR_ID_PROVIDER_ISSUER" \
   -e "SAML_ID_PROVIDER_CERT_PATH=/etc/id_provider.cert" \
+  -e "SAML_ID_PROVIDER_CALLBACK_URL=https://stf.example.org/auth/saml/callback" \
   -p %i:3000 \
   devicefarmer/stf:latest \
   stf auth-saml2 --port 3000 \

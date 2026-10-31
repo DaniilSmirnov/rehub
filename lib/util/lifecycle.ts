@@ -5,10 +5,15 @@ const log = logger.createLogger('util:lifecycle')
 
 type LifecycleObserver = () => Promise<unknown> | unknown
 
+// How long the observers get in total before the process leaves without them. Kept above the
+// provider's 30s kill timeout, so that a provider still waits for its device processes to exit.
+const SHUTDOWN_TIMEOUT = 60000
+
 export default new (class Lifecycle {
     cleanups: LifecycleObserver[] = []
     cleanupsFatal: LifecycleObserver[] = []
     ending = false
+    shutdownTimeout = SHUTDOWN_TIMEOUT
 
     constructor() {
         process.on("SIGINT", this.graceful.bind(this))
@@ -50,7 +55,7 @@ export default new (class Lifecycle {
         }
 
         this.ending = true
-        return Promise.all(this.cleanups.map((fn) => fn())).then(() =>
+        return this.settle(this.cleanups).then(() =>
             process.exit(0)
         )
     }
@@ -60,9 +65,35 @@ export default new (class Lifecycle {
         log.fatal(`Shutting down due to fatal error ${err || ''}`)
         this.ending = true
         // process.exit(1)
-        Promise.all(this.cleanupsFatal.map((fn) => fn())).then(() =>
+        this.settle(this.cleanupsFatal).then(() =>
             process.exit(1)
         )
+    }
+
+    // Runs every observer and resolves once they are all done with, however they end. One
+    // observer that throws or never settles would otherwise keep the whole unit alive; a
+    // shutdown is not the place to insist every last thing succeeded.
+    settle(observers: LifecycleObserver[]): Promise<void> {
+        const timeout = this.shutdownTimeout
+        let timer: NodeJS.Timeout | undefined
+
+        const all = Promise.all(observers.map(async(fn) => {
+            try {
+                await fn()
+            }
+            catch (err: any) {
+                log.error(`Shutdown observer failed ${err?.stack || err}`)
+            }
+        })).then(() => {})
+
+        const deadline = new Promise<void>((resolve) => {
+            timer = setTimeout(() => {
+                log.warn(`Shutdown observers did not finish in ${timeout}ms; exiting anyway`)
+                resolve()
+            }, timeout)
+        })
+
+        return Promise.race([all, deadline]).finally(() => clearTimeout(timer))
     }
 
     observe(cleanupFn: LifecycleObserver) {

@@ -7,7 +7,7 @@ interface RestoreUser {
     name: string
     group: string
     groups?: {subscribed?: string[]}
-    adbKeys?: Array<{fingerprint: string}>
+    adbKeys?: Array<{fingerprint: string, publicKey?: string}>
 }
 
 export interface OwnerRestoreDeps {

@@ -20,6 +20,8 @@ vi.mock('../../../../lib/units/device/resources/minirev.js', () => ({default: {c
 vi.mock('../../../../lib/util/lifecycle.js', () => ({default: {observe: vi.fn(), fatal: vi.fn(), ending: false}}))
 vi.mock('../../../../lib/util/streamutil.js', () => ({talk: vi.fn()}))
 
+const {encodePublicKey} = await import('../../../../lib/util/adbkeyutil.js')
+
 const connect = (await import('../../../../lib/units/device/plugins/connect.js')).default
 const pair = generateKeyPairSync('rsa', {modulusLength: 2048})
 const modulus = Buffer.from(pair.publicKey.export({format: 'jwk'}).n!, 'base64url')
@@ -30,6 +32,9 @@ Buffer.from(modulus).reverse().copy(publicStruct, 8)
 publicStruct.writeUInt32LE(65537, 520)
 const publicKey = `${publicStruct.toString('base64')} test@devicehub\0`
 const fingerprint = (await Auth.parsePublicKey(publicKey.slice(0, -1))).fingerprint
+// The same key with real Montgomery fields, as a user would store it
+const storedKey = encodePublicKey(Object.assign(await Auth.parsePublicKey(publicKey.slice(0, -1)), {fingerprint: ''}))
+const storedFingerprint = (await Auth.parsePublicKey(storedKey)).fingerprint
 
 class ClientStream extends Duplex {
     remoteAddress = '127.0.0.1'
@@ -42,9 +47,10 @@ class ClientStream extends Duplex {
 const closing: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of closing.splice(0)) await close(); vi.clearAllMocks() })
 
-async function setup(silent: boolean, keys?: string[]) {
+async function setup(silent: boolean, keys?: string[], publicKeys?: string[]) {
     const group = Object.assign(new EventEmitter(), {keepalive: vi.fn()})
-    let handlers: any, auth: any
+    const transport = {send: vi.fn()}
+    let handlers: any, bridgeOptions: any
     const sockets: any[] = []
     const server = Object.assign(new EventEmitter(), {
         listen: vi.fn(() => queueMicrotask(() => server.emit('listening'))),
@@ -54,30 +60,42 @@ async function setup(silent: boolean, keys?: string[]) {
     const openLocal = vi.fn(async () => new PassThrough())
     const client = {getDevice: () => ({shell: async () => new PassThrough(), openLocal,
         getProperties: async () => ({'ro.product.name': 'test', 'ro.product.model': 'test', 'ro.product.device': 'test'})}),
-    createTcpUsbBridge: (_serial: string, options: any) => { auth = options.auth; return server }}
+    createTcpUsbBridge: (_serial: string, options: any) => { bridgeOptions = options; return server }}
     const connector = {init: (options: any) => { handlers = options.handlers }, stop: vi.fn(async () => {})}
-    await connect.invoke({silent, serial: 'serial', connectPort: 7401}, client, {}, group,
+    await connect.invoke({silent, serial: 'serial', connectPort: 7401}, client, transport, group,
         {}, () => 'localhost:7401', connector, {model: 'test'}, {name: {id: 'test'}}, {bin: 'minirev', stop: async () => {}})
-    group.emit('join', {adbKeys: keys})
+    group.emit('join', {owner: {email: 'owner@example.test'}, adbKeys: keys, adbPublicKeys: publicKeys})
+    // The full keys are parsed asynchronously
+    await new Promise(resolve => setTimeout(resolve, 10))
     await handlers.start()
     closing.push(() => handlers.stop())
     const socket = () => {
         const stream = new ClientStream()
-        const connection = new TcpUsbSocket(client as any, 'serial', stream as any, {auth}) as any
+        const connection = new TcpUsbSocket(client as any, 'serial', stream as any, bridgeOptions) as any
         // TcpUsbServer forwards client errors to the server, just like the real bridge.
         connection.on('error', (error: Error) => server.emit('error', error))
         sockets.push(connection)
         server.emit('connection', connection)
         return {connection, stream}
     }
-    const authenticate = (connection: any, validSignature = true, key = publicKey) => {
+    const sign = (connection: any, validSignature = true) => {
         connection.token = Buffer.alloc(20, 7)
         const digestInfo = Buffer.concat([Buffer.from('3021300906052b0e03021a05000414', 'hex'), connection.token])
-        connection.signature = privateEncrypt({key: pair.privateKey, padding: constants.RSA_PKCS1_PADDING}, digestInfo)
+        const signature = privateEncrypt({key: pair.privateKey, padding: constants.RSA_PKCS1_PADDING}, digestInfo)
         if (!validSignature) connection.token[0] ^= 1
+        return signature
+    }
+    const authenticate = (connection: any, validSignature = true, key = publicKey) => {
+        connection.signature = sign(connection, validSignature)
         connection.reader.emit('packet', {command: Packet.A_AUTH, arg0: 3, arg1: 0, data: Buffer.from(key)})
     }
-    return {group, server, socket, authenticate, handlers, openLocal}
+    // What a client sends first: a signature, which a device accepts outright for a key it knows
+    const sendSignature = (connection: any) => {
+        connection.version = 0x01000000
+        connection.maxPayload = 4096
+        connection.reader.emit('packet', {command: Packet.A_AUTH, arg0: 2, arg1: 0, data: sign(connection)})
+    }
+    return {group, server, socket, authenticate, sendSignature, handlers, openLocal, transport}
 }
 
 describe('remote ADB authentication', () => {
@@ -124,5 +142,57 @@ describe('remote ADB authentication', () => {
             data: Buffer.from('reverse:forward:tcp:7000;tcp:8000\0')})
         await vi.waitFor(() => expect(connection.ended).toBe(true))
         expect(h.openLocal).not.toHaveBeenCalled()
+    })
+})
+
+describe('remote ADB authentication with stored public keys', () => {
+    it('accepts the signature of a key the owner stored in full', async () => {
+        const h = await setup(false, [storedFingerprint], [storedKey])
+        const {connection} = h.socket()
+        h.sendSignature(connection)
+        await vi.waitFor(() => expect(connection.authorized).toBe(true))
+        expect(h.transport.send).not.toHaveBeenCalled()
+    })
+
+    it('ignores stored keys that are not among the owner\'s fingerprints', async () => {
+        const h = await setup(false, ['different'], [storedKey])
+        const {connection, stream} = h.socket()
+        h.sendSignature(connection)
+        await vi.waitFor(() => expect(stream.writes.length).toBeGreaterThan(0))
+        expect(connection.authorized).toBe(false)
+    })
+
+    it('sends the full key along when the owner has only its fingerprint', async () => {
+        const h = await setup(false, [storedFingerprint], [])
+        const {connection} = h.socket()
+        h.authenticate(connection, true, `${storedKey}\0`)
+        await vi.waitFor(() => expect(connection.authorized).toBe(true))
+        await vi.waitFor(() => expect(h.transport.send).toHaveBeenCalledOnce())
+        const packed = Buffer.from(h.transport.send.mock.calls[0][0][1]).toString('latin1')
+        expect(packed).toContain('owner@example.test')
+        expect(packed).toContain(storedFingerprint)
+
+        // The next connection goes through on its signature alone
+        const next = h.socket()
+        h.sendSignature(next.connection)
+        await vi.waitFor(() => expect(next.connection.authorized).toBe(true))
+        expect(h.transport.send).toHaveBeenCalledOnce()
+    })
+
+    it('stores nothing for an owner without keys', async () => {
+        const h = await setup(false, [], [])
+        const {connection} = h.socket()
+        h.authenticate(connection)
+        await vi.waitFor(() => expect(connection.authorized).toBe(true))
+        expect(h.transport.send).not.toHaveBeenCalled()
+    })
+
+    it('forgets the stored keys when the owner leaves', async () => {
+        const h = await setup(false, [storedFingerprint], [storedKey])
+        h.group.emit('leave')
+        const {connection, stream} = h.socket()
+        h.sendSignature(connection)
+        await vi.waitFor(() => expect(stream.writes.length).toBeGreaterThan(0))
+        expect(connection.authorized).toBe(false)
     })
 })

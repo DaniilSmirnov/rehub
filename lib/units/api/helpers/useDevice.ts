@@ -18,6 +18,7 @@ import deviceutil from '../../../util/deviceutil.js'
 import wireutil from '../../../wire/util.js'
 import type {TransactionResult} from '../../../wire/transmanager.js'
 import {GroupMessage, ConnectStartMessage, OwnerMessage} from '../../../wire/wire.js'
+import {ownerAdbKeys} from '../../../util/adbkeyutil.js'
 
 export const UseDeviceError = Object.freeze({
     NOT_FOUND: 0,
@@ -69,7 +70,7 @@ export async function useDevice(
             requirements,
             usage: usage || undefined,
             timeout: timeout || undefined,
-            keys: user.adbKeys?.map((k: {fingerprint: string}) => k.fingerprint) || [],
+            ...ownerAdbKeys(user.adbKeys),
         })
     }
     catch (err: any) {

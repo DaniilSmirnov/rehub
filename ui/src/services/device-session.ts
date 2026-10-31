@@ -73,7 +73,9 @@ export class DeviceSession {
   describe(): Promise<SilentDevice> {
     if (!this.description) {
       this.description = openstfApiClient
-        .get<{ device: SilentDevice }>(`/silent-devices/${encodeURIComponent(this.provider!)}/${encodeURIComponent(this.serial)}`)
+        .get<{
+          device: SilentDevice
+        }>(`/silent-devices/${encodeURIComponent(this.provider!)}/${encodeURIComponent(this.serial)}`)
         .then(({ data }) => {
           this.snapshot = data.device
 

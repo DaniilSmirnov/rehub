@@ -31,6 +31,8 @@ message SilentActor {
   required string name = 2;
   required string group = 3;
   repeated string adbKeys = 4;
+  // Full keys in the ~/.android/adbkey.pub format, for the ones that have one stored
+  repeated string adbPublicKeys = 5;
 }
 
 message DescribeSilentDevice {
@@ -490,6 +492,8 @@ message GroupMessage {
   repeated DeviceRequirement requirements = 3;
   optional string usage = 4;
   repeated string keys = 5;
+  // Full keys in the ~/.android/adbkey.pub format, for the ones that have one stored
+  repeated string publicKeys = 6;
 }
 
 message AutoGroupMessage {
@@ -522,6 +526,14 @@ message JoinGroupByVncAuthResponseMessage {
 }
 
 message AdbKeysUpdatedMessage {
+}
+
+// A device accepted the owner's key by its fingerprint: the full key, to store for next time
+message AdbPublicKeyMessage {
+  required string serial = 1;
+  required string email = 2;
+  required string fingerprint = 3;
+  required string publicKey = 4;
 }
 
 message VncAuthResponsesUpdatedMessage {
