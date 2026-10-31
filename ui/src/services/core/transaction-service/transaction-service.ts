@@ -25,7 +25,7 @@ export class TransactionService<T = unknown> {
   private onDisconnect = (): void => {
     this.abortController.abort('Device connection closed')
   }
-constructor(@unmanaged() private connection = socket) {
+  constructor(@unmanaged() private connection = socket) {
     makeAutoObservable<this, 'connection'>(this, { connection: false })
 
     this.donePromise = Promise.withResolvers()
@@ -68,8 +68,6 @@ constructor(@unmanaged() private connection = socket) {
       abort: (reason) => this.abortController.abort(reason),
     }
   }
-
-  
 
   cleanUpTransaction(): void {
     this.progressFn = null
