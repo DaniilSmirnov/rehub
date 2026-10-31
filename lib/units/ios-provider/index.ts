@@ -35,6 +35,8 @@ type DeviceHandler = (udid: string, simulator: boolean) => any | Promise<any>
 
 interface Options {
     name: string
+    iosBackend?: 'xcode' | 'go-ios'
+    goIosPath?: string
     wdaPorts: number[]
     screenListenPorts: number[]
     screenWsPorts: number[]
@@ -267,7 +269,7 @@ export default async (options: Options): Promise<void> => {
     )
 
     // TODO: add option.disallowSimulators (default: false)
-    const iosObserver = new IOSObserver()
+    const iosObserver = new IOSObserver(options.iosBackend === 'go-ios' ? options.goIosPath || 'ios' : undefined)
     iosObserver.on('attached', onAttach)
     iosObserver.on('detached', onDetach)
     iosObserver.listen()

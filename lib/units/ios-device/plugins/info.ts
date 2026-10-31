@@ -15,6 +15,7 @@ import {
     UpdateIosDevice
 } from '../../../wire/wire.js'
 import {execFileSync} from 'child_process'
+import {describeDevice} from '../support/go-ios.js'
 
 export default syrup.serial()
     .dependency(transport)
@@ -22,9 +23,9 @@ export default syrup.serial()
     .define(async(options, transport, wdaClient) => {
         const log = logger.createLogger('device:info')
 
-        const deviceInfo = JSON.parse(
-            execFileSync('idb', ['describe', '--udid', options.serial, '--json']).toString()
-        )
+        const deviceInfo = options.iosBackend === 'go-ios' && !options.isSimulator
+            ? await describeDevice({goIosPath: options.goIosPath || 'ios', serial: options.serial})
+            : JSON.parse(execFileSync('idb', ['describe', '--udid', options.serial, '--json']).toString())
 
         options.deviceInfo = deviceInfo
         const marketName = getModelName(deviceInfo?.extended?.device?.ProductType) || deviceInfo?.name || 'unknown'
