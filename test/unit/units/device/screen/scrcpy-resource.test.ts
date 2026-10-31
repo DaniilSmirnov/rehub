@@ -24,8 +24,10 @@ const fakeAdb = (refusals: number) => {
     const device = {
         push: async(_src: string, dest: string) => {
             calls.push.push(dest)
-            const transfer = new EventEmitter()
-            setImmediate(() => transfer.emit('end'))
+            // Like @u4/adbkit: push() resolves once the transfer has already ended,
+            // so a listener for 'end' attached afterwards never fires
+            const transfer = Object.assign(new EventEmitter(), {waitForEnd: async() => {}})
+            transfer.emit('end')
             return transfer
         },
         shell: async(cmd: string) => {
@@ -75,5 +77,5 @@ describe('scrcpy resource', () => {
         const {adb} = fakeAdb(Infinity)
         const resource = await scrcpy.invoke({serial: 'serial'}, adb)
         await expect(resource.start({maxSize: 1280, maxFps: 30, bitRate: 4000000}, () => {})).rejects.toThrow('closed')
-    })
+    }, 15000) // retries for 10 s before giving up
 })
