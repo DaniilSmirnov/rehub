@@ -3,7 +3,7 @@ import {InactivityMonitor} from '../../../../lib/util/inactivity-monitor.js'
 import {SilentDeviceRuntime} from '../../../../lib/units/base-device/support/silent-runtime.js'
 import {WireRouter} from '../../../../lib/wire/router.js'
 import {Any} from '../../../../lib/wire/google/protobuf/any.js'
-import {DeviceIdentityMessage, DeviceReadyMessage, ShellCommandMessage} from '../../../../lib/wire/wire.js'
+import {DeviceIdentityMessage, DeviceReadyMessage, ShellCommandMessage, JoinGroupMessage} from '../../../../lib/wire/wire.js'
 import wireutil from '../../../../lib/wire/util.js'
 
 vi.mock('../../../../lib/units/base-device/support/router.js', () => ({default: {consume() {}}}))
@@ -24,8 +24,9 @@ async function device(silent: boolean, timeout = 1000) {
     const inactivity = new InactivityMonitor()
     const runtime = silent ? new SilentDeviceRuntime('p', 's', [], vi.fn(), inactivity, timeout) : undefined
     const router = new WireRouter().on(ShellCommandMessage, () => {})
+    const send = vi.fn()
     const group = await groupPlugin.invoke({serial: 's', silent, groupTimeout: timeout}, router,
-        {inactivity, silent: runtime, send: vi.fn()})
+        {inactivity, silent: runtime, send})
     closing.push(() => runtime ? runtime.close() : group.leave('device_absent'))
     let lease: {instanceId: string; leaseId: string} | undefined
     if (runtime) {
@@ -38,7 +39,7 @@ async function device(silent: boolean, timeout = 1000) {
         runtime?.authorize(lease)
         router.handler()('', Buffer.from(wireutil.pack(ShellCommandMessage, {command: 'true', timeout: 1000})))
     }
-    return {group, runtime, lease, command}
+    return {group, runtime, lease, command, send}
 }
 
 describe.each([false, true])('shared worker inactivity (silent: %s)', silent => {
@@ -90,13 +91,13 @@ it('revokes the silent lease at idle expiry and waits for platform cleanup befor
     expect(vi.getTimerCount()).toBe(1)
 })
 
-it('preserves normal reacquisition and replaces the old deadline on takeover', async () => {
+it('applies the requested timeout on renewal and replaces the old deadline on takeover', async () => {
     const {group} = await device(false)
     const left = vi.fn()
     group.on('leave', left)
     await vi.advanceTimersByTimeAsync(750)
     group.join(owner, 100, 'debug', [])
-    await vi.advanceTimersByTimeAsync(999)
+    await vi.advanceTimersByTimeAsync(99)
     expect(left).not.toHaveBeenCalled()
     group.join({...owner, email: 'next'}, 500, 'debug', [])
     expect(vi.getTimerCount()).toBe(1)
@@ -104,4 +105,44 @@ it('preserves normal reacquisition and replaces the old deadline on takeover', a
     expect(left).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(left).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({email: 'next'}), 'automatic_timeout')
+})
+
+it('renews from the current time, publishes renewal once and clears the timer on release', async () => {
+    const {group, send} = await device(false)
+    send.mockClear()
+    const renewed = vi.fn()
+    const joined = vi.fn()
+    const left = vi.fn()
+    group.on('renew', renewed)
+    group.on('join', joined)
+    group.on('leave', left)
+    await vi.advanceTimersByTimeAsync(750)
+    group.join(owner, 2000, '', [])
+    expect(renewed).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({owner, timeout: 2000, usage: 'debug'}))
+    expect(joined).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledExactlyOnceWith([wireutil.global, wireutil.pack(JoinGroupMessage, {
+        serial: 's', owner, timeout: 2000, usage: 'debug'
+    })])
+    expect(vi.getTimerCount()).toBe(1)
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(left).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(left).toHaveBeenCalledExactlyOnceWith(owner, 'automatic_timeout')
+    expect(vi.getTimerCount()).toBe(0)
+
+    group.join(owner, 1000, '', [])
+    group.leave('ungroup_request')
+    expect(vi.getTimerCount()).toBe(0)
+    group.join({...owner, email: 'next'}, 2000, '', [])
+    await vi.advanceTimersByTimeAsync(1000)
+    await expect(group.get()).resolves.toMatchObject({email: 'next'})
+})
+
+it.each([0, 1])('switches an existing booking to unlimited timeout %s', async timeout => {
+    const {group} = await device(false)
+    await vi.advanceTimersByTimeAsync(750)
+    group.join(owner, timeout, '', [])
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(86_400_000)
+    await expect(group.get()).resolves.toMatchObject({email: owner.email})
 })

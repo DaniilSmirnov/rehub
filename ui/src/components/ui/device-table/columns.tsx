@@ -407,7 +407,7 @@ export const DEVICE_COLUMNS = [
   ),
   columnHelper.accessor(
     (row) =>
-      row.statusChangedAt && row.bookedBefore
+      row.owner && row.statusChangedAt && row.bookedBefore && row.bookedBefore > 1
         ? dateToFormattedString({ value: getExpireTime(row.statusChangedAt, row.bookedBefore), needTime: true })
         : undefined,
     {
