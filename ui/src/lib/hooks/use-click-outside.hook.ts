@@ -10,8 +10,10 @@ export const useClickOutside = <T extends HTMLElement = HTMLElement>(ref: RefObj
       }
     }
 
-    document.addEventListener('click', onClickOutside)
+    const ownerDocument = ref.current?.ownerDocument || document
 
-    return (): void => document.removeEventListener('click', onClickOutside)
+    ownerDocument.addEventListener('click', onClickOutside)
+
+    return (): void => ownerDocument.removeEventListener('click', onClickOutside)
   }, [cb])
 }
