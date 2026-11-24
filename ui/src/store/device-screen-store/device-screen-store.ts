@@ -59,6 +59,8 @@ export class DeviceScreenStore {
   private h264Decoder: H264ScreenDecoder | null = null
   /** Latest decoded frame not drawn yet: older ones are dropped, not queued. */
   private pendingFrame: VideoFrame | null = null
+  private animationFrame: number | null = null
+  private animationWindow: Window | null = null
 
   isAspectRatioModeLetterbox = false
   isScreenLoading = false
@@ -172,10 +174,21 @@ export class DeviceScreenStore {
     }
   }
 
+  // A frame scheduled in the opener can be suspended when its tab is hidden.
+  // Reschedule on the document that actually owns the canvas after a PiP move.
+  refreshRenderingWindow(): void {
+    this.cancelAnimationFrame()
+
+    if (this.pendingFrame) this.scheduleFrame()
+    this.determineAspectRatioMode()
+
+    if (this.canvasWrapper) this.updateBounds()
+  }
+
   private shouldUpdateScreen(): boolean {
     return Boolean(
       this.showScreen &&
-        document.visibilityState === 'visible' &&
+        this.canvasWrapper?.ownerDocument.visibilityState === 'visible' &&
         this.websocket &&
         this.websocket.readyState === WebSocket.OPEN
     )
@@ -435,14 +448,18 @@ export class DeviceScreenStore {
 
   /* Draws the latest decoded frame on the next animation frame */
   private onDecodedFrame(frame: VideoFrame): void {
-    const scheduled = this.pendingFrame !== null
-
     this.pendingFrame?.close()
     this.pendingFrame = frame
 
-    if (scheduled) return
+    if (this.animationFrame !== null) return
 
-    requestAnimationFrame(() => {
+    this.scheduleFrame()
+  }
+
+  private scheduleFrame(): void {
+    this.animationWindow = this.canvasWrapper?.ownerDocument.defaultView || window
+    this.animationFrame = this.animationWindow.requestAnimationFrame(() => {
+      this.animationFrame = null
       const latest = this.pendingFrame
 
       this.pendingFrame = null
@@ -450,9 +467,19 @@ export class DeviceScreenStore {
       if (!latest) return
 
       createImageBitmap(latest)
-        .then((image) => this.renderImage(image))
+        .then((image) => {
+          if (this.disposed) image.close()
+          else this.renderImage(image)
+        })
+        .catch((error) => console.warn('Unable to render screen frame:', error))
         .finally(() => latest.close())
     })
+  }
+
+  private cancelAnimationFrame(): void {
+    if (this.animationFrame !== null) this.animationWindow?.cancelAnimationFrame(this.animationFrame)
+    this.animationFrame = null
+    this.animationWindow = null
   }
 
   private startH264Decoder(): void {
@@ -471,6 +498,7 @@ export class DeviceScreenStore {
   }
 
   private closeH264Decoder(): void {
+    this.cancelAnimationFrame()
     this.h264Decoder?.close()
     this.h264Decoder = null
     this.pendingFrame?.close()

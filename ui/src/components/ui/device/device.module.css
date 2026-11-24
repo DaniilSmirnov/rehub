@@ -1,0 +1,47 @@
+.device {
+  min-width: 0;
+  min-height: 0;
+}
+
+.viewportHost {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.viewport {
+  display: flex;
+  flex-direction: column;
+
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+
+  color: var(--vkui--color_text_primary);
+
+  background: var(--vkui--color_background_content);
+
+  > :last-child {
+    flex-shrink: 0;
+  }
+}
+
+.placeholder {
+  position: absolute;
+  inset: 0;
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+
+  padding: 16px;
+
+  text-align: center;
+}
+
+.pipError {
+  padding: 8px 12px;
+  color: var(--vkui--color_text_negative);
+}

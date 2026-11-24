@@ -5,7 +5,13 @@ import { observer } from 'mobx-react-lite'
 import { useTranslation } from 'react-i18next'
 import { useInjection } from 'inversify-react'
 import { ButtonGroup, EllipsisText, Flex, Button } from '@vkontakte/vkui'
-import { Icon24CancelOutline, Icon24VerticalRectangle9x16Outline, Icon28DevicesOutline } from '@vkontakte/icons'
+import {
+  Icon24CancelOutline,
+  Icon24VerticalRectangle9x16Outline,
+  Icon28DevicesOutline,
+  Icon24PictureInPicture16x9Outline,
+  Icon24PictureInPictureOut16x9Outline,
+} from '@vkontakte/icons'
 
 import { WarningModal } from '@/components/ui/modals'
 import { ConditionalRender } from '@/components/lib/conditional-render'
@@ -18,7 +24,15 @@ import { getMainRoute } from '@/constants/route-paths'
 
 import styles from './device-top-bar.module.css'
 
-export const DeviceTopBar = observer(() => {
+interface DeviceTopBarProps {
+  isPictureInPictureOpen?: boolean
+  isPictureInPictureSupported?: boolean
+  onPictureInPicture?: () => void
+  onReturnToTab?: () => void
+}
+
+export const DeviceTopBar = observer((props: DeviceTopBarProps) => {
+  const { isPictureInPictureOpen, isPictureInPictureSupported, onPictureInPicture, onReturnToTab } = props
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [isConfirmationOpen, setIsConfirmationOpen] = useState(false)
@@ -58,6 +72,23 @@ export const DeviceTopBar = observer(() => {
         <EllipsisText>{deviceTitle}</EllipsisText>
       </Flex>
       <ButtonGroup align='center' gap='none' mode='horizontal'>
+        {!onReturnToTab && (
+          <Button
+            appearance='neutral'
+            aria-label={t('Picture-in-picture')}
+            aria-pressed={isPictureInPictureOpen}
+            before={<Icon24PictureInPicture16x9Outline />}
+            className={styles.topButton}
+            disabled={!isPictureInPictureSupported || device?.platform === 'Tizen'}
+            mode='tertiary'
+            title={
+              isPictureInPictureSupported
+                ? t('Picture-in-picture')
+                : t('Interactive picture-in-picture is not supported in this browser')
+            }
+            onClick={onPictureInPicture}
+          />
+        )}
         <Button
           appearance='neutral'
           before={<Icon24VerticalRectangle9x16Outline />}
@@ -79,16 +110,23 @@ export const DeviceTopBar = observer(() => {
           onClick={() => deviceControlStore.tryToRotate('landscape')}
         />
         <ConditionalRender conditions={[device?.platform === 'Android']}>
-          <ScreenQualitySelector />
+          <ScreenQualitySelector useNativeSlider={Boolean(onReturnToTab)} />
         </ConditionalRender>
         <Button
           appearance='neutral'
-          before={<Icon24CancelOutline fill='var(--vkui--color_icon_negative)' />}
+          aria-label={onReturnToTab ? t('Return to tab') : t('Stop Using')}
           borderRadiusMode='inherit'
           className={styles.topButton}
           mode='tertiary'
-          title={t('Stop Using')}
-          onClick={() => setIsConfirmationOpen(true)}
+          title={onReturnToTab ? t('Return to tab') : t('Stop Using')}
+          before={
+            onReturnToTab ? (
+              <Icon24PictureInPictureOut16x9Outline />
+            ) : (
+              <Icon24CancelOutline fill='var(--vkui--color_icon_negative)' />
+            )
+          }
+          onClick={onReturnToTab || (() => setIsConfirmationOpen(true))}
         />
       </ButtonGroup>
       <WarningModal

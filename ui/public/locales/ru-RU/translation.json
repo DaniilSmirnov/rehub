@@ -489,5 +489,10 @@
   "View only": "Только просмотр",
   "Automation finished": "Автоматизация завершена",
   "This device is not under automation": "Устройство не под автоматизацией",
-  "Screen disconnected": "Экран отключён"
+  "Screen disconnected": "Экран отключён",
+  "Picture-in-picture": "Картинка в картинке",
+  "Interactive picture-in-picture is not supported in this browser": "Интерактивный режим «Картинка в картинке» не поддерживается этим браузером",
+  "Could not open picture-in-picture. Try again from the device tab.": "Не удалось открыть мини-окно. Повторите попытку из вкладки устройства.",
+  "Device is open in picture-in-picture": "Устройство открыто в мини-окне",
+  "Return to tab": "Вернуть во вкладку"
 }

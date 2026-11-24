@@ -484,5 +484,10 @@
   "View only": "View only",
   "Automation finished": "Automation finished",
   "This device is not under automation": "This device is not under automation",
-  "Screen disconnected": "Screen disconnected"
+  "Screen disconnected": "Screen disconnected",
+  "Picture-in-picture": "Picture-in-picture",
+  "Interactive picture-in-picture is not supported in this browser": "Interactive picture-in-picture is not supported in this browser",
+  "Could not open picture-in-picture. Try again from the device tab.": "Could not open picture-in-picture. Try again from the device tab.",
+  "Device is open in picture-in-picture": "Device is open in picture-in-picture",
+  "Return to tab": "Return to tab"
 }

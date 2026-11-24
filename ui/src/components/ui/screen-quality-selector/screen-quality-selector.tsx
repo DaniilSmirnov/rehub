@@ -13,7 +13,7 @@ import styles from './screen-quality-selector.module.css'
 
 const QUALITY_OPTIONS = [10, 20, 30, 40, 50, 60, 70, 80]
 
-export const ScreenQualitySelector = observer(() => {
+export const ScreenQualitySelector = observer(({ useNativeSlider = false }: { useNativeSlider?: boolean }) => {
   const { t } = useTranslation()
 
   const deviceControlStore = useInjection(CONTAINER_IDS.deviceControlStore)
@@ -29,14 +29,27 @@ export const ScreenQualitySelector = observer(() => {
       className={styles.screenQualitySelector}
       content={() => (
         <>
-          <MarkedSliderRange
-            marks={QUALITY_OPTIONS}
-            max={80}
-            min={10}
-            step={10}
-            value={sliderValue || 10}
-            onAfterChange={onAfterSliderChange}
-          />
+          {useNativeSlider ? (
+            <input
+              aria-label={t('Quality')}
+              className={styles.qualityRange}
+              max={80}
+              min={10}
+              step={10}
+              type='range'
+              value={sliderValue || 10}
+              onChange={(event) => onAfterSliderChange(Number(event.target.value))}
+            />
+          ) : (
+            <MarkedSliderRange
+              marks={QUALITY_OPTIONS}
+              max={80}
+              min={10}
+              step={10}
+              value={sliderValue || 10}
+              onAfterChange={onAfterSliderChange}
+            />
+          )}
           <Flex justify='space-between'>
             <Caption level='1'>{t('Speed')}</Caption>
             <Caption level='1'>{t('Quality')}</Caption>
