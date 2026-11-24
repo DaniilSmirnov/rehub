@@ -34,6 +34,7 @@ type Joined = boolean
 
 interface GroupEvents {
     join: [JoinEvent]
+    renew: [JoinEvent]
     leave: [OwnerState, string]
     autojoin: [ADBKey, Joined]
     error: [string]
@@ -106,7 +107,8 @@ export class GroupManager extends EventEmitter<GroupEvents> {
 
             if (!!this.currentOwner?.group) {
                 if (this.currentOwner.email === owner.email) {
-                    this.keepalive()
+                    this.startTimeout(timeout)
+                    super.emit('renew', {owner: this.currentOwner, timeout, usage: this.currentUsage || '', adbKeys, adbPublicKeys})
                     return this.currentOwner
                 }
 
@@ -115,10 +117,7 @@ export class GroupManager extends EventEmitter<GroupEvents> {
 
             this.currentOwner = owner
             this.currentUsage = usage || null
-            this.inactivity.start(timeout, () => {
-                this.leave('automatic_timeout')
-                this.emit('timeout')
-            })
+            this.startTimeout(timeout)
 
             super.emit('join', { owner, timeout, usage, adbKeys, adbPublicKeys })
 
@@ -128,6 +127,13 @@ export class GroupManager extends EventEmitter<GroupEvents> {
             super.emit('error', `Failed to join group ${JSON.stringify(owner)}, Error: ${err?.message}`)
             return this.currentOwner
         }
+    }
+
+    private startTimeout(timeout: number) {
+        this.inactivity.start(timeout, () => {
+            this.leave('automatic_timeout')
+            this.emit('timeout')
+        })
     }
 
     leave(reason: string, send = true) {
@@ -165,7 +171,7 @@ export default syrup.serial()
         const plugin = new GroupManager(transport.inactivity)
         transport.silent?.bindGroup(plugin)
 
-        plugin.on('join', e => {
+        const publishBooking = (e: JoinEvent) => {
             log.important('Now owned by "%s"', e.owner.email)
             log.important('Device now in group "%s"', e.owner.name)
             log.info(`Rent time is ${e.timeout}`)
@@ -180,7 +186,9 @@ export default syrup.serial()
                     timeout: e.timeout
                 })
             ])
-        })
+        }
+        plugin.on('join', publishBooking)
+        plugin.on('renew', publishBooking)
 
         plugin.on('leave', (owner, reason) => {
             log.important('No longer owned by "%s" (reason: %s)', owner.email, reason)

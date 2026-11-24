@@ -185,6 +185,7 @@ export default (async (options: Options) => {
         const req = socket.request as any
         const user = req.user
         const ownership = new DeviceOwnership()
+        const pendingBookingUpdates = new Map<string, symbol>()
 
         user.ip = socket.handshake.query.uip || req.ip
         socket.emit('socket.ip', user.ip)
@@ -419,14 +420,22 @@ export default (async (options: Options) => {
                 socket.emit('logcat.entry', message)
             },
             JoinGroupMessage: (_ch: string, message: any) => {
+                const update = Symbol()
+                pendingBookingUpdates.set(message.serial, update)
                 // Track ownership by serial (provider resolved lazily on first command).
                 if (message.owner && message.owner.email === user.email) {
                     ownership.claim(message.serial, ownership.providerOf(message.serial) ?? '')
                     providerFor(message.serial).catch(() => {})
                 }
 
-                AllModel.getInstalledApplications({serial: message.serial})
-                    .then((applications: any) => {
+                Promise.all([
+                    AllModel.getInstalledApplications({serial: message.serial}).catch(() => undefined),
+                    dbapi.loadDeviceBySerial(message.serial)
+                ])
+                    .then(([applications, device]) => {
+                        // A later renewal or release supersedes this asynchronous lookup.
+                        if (pendingBookingUpdates.get(message.serial) !== update) return
+                        pendingBookingUpdates.delete(message.serial)
                         socket.emit(`device.application-${message.serial}`, {applications})
                         socket.emit('device.change', {
                             important: true,
@@ -435,11 +444,15 @@ export default (async (options: Options) => {
                                 owner: message.owner,
                                 likelyLeaveReason: 'owner_change',
                                 usage: message.usage,
+                                statusChangedAt: device?.statusChangedAt,
+                                bookedBefore: device?.bookedBefore,
                                 applications
                             }, user)
                         })
                     })
                     .catch(() => {
+                        if (pendingBookingUpdates.get(message.serial) !== update) return
+                        pendingBookingUpdates.delete(message.serial)
                         socket.emit('device.change', {
                             important: true,
                             data: datautil.applyOwner({
@@ -458,6 +471,7 @@ export default (async (options: Options) => {
                 })
             },
             LeaveGroupMessage: (_ch: string, message: any) => {
+                pendingBookingUpdates.delete(message.serial)
                 ownership.release(message.serial)
                 ownedCache.invalidate(user.email)
                 io.emit('device.change', {
@@ -465,6 +479,8 @@ export default (async (options: Options) => {
                     data: datautil.applyOwner({
                         serial: message.serial,
                         owner: null,
+                        usage: null,
+                        bookedBefore: 0,
                         likelyLeaveReason: message.reason
                     }, user)
                 })

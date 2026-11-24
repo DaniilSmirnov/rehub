@@ -26,7 +26,11 @@ export const DeviceBookingControl = observer(({ className }: { className?: strin
       <MiniInfoCell>
         {t('Booked before')}
         {': '}
-        <time>{dateToFormattedString({ value: bookingService.bookedBeforeTime, onlyTime: true })}</time>
+        <time>
+          {bookingService.bookedBeforeTime
+            ? dateToFormattedString({ value: bookingService.bookedBeforeTime, onlyTime: true })
+            : '—'}
+        </time>
       </MiniInfoCell>
     </ContentCard>
   )
