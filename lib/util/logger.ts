@@ -51,7 +51,7 @@ export class Log extends EventEmitter {
         'groups-engine': [chalk.gray, chalk.bgBlack],
         poorxy: [chalk.gray, chalk.bgBlack],
         api: [chalk.green, chalk.bgGreen],
-        triproxy: [chalk.magenta, chalk.bgMagenta],
+        proxy: [chalk.magenta, chalk.bgMagenta],
         processor: [chalk.red, chalk.bgRed],
         provider: [chalk.blue, chalk.bgBlue],
         device: [chalk.cyan, chalk.bgCyan],
@@ -87,7 +87,9 @@ export class Log extends EventEmitter {
     }
 
     debug(...args: LogArguments): void {
-        this._write(this._entry(LogLevel.DEBUG, args))
+        if (process.env.LOG_LEVEL === 'debug') {
+            this._write(this._entry(LogLevel.DEBUG, args))
+        }
     }
 
     verbose(...args: LogArguments): void {

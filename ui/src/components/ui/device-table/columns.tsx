@@ -118,9 +118,9 @@ export const DEVICE_COLUMNS = [
     filterFn: startsWithFilter,
     sortingFn: deviceStatusSorting,
     cell: ({ getValue, row }) => {
-      const { serial, channel } = row.original
+      const { serial } = row.original
 
-      return <DeviceStatusCell channel={channel} deviceState={getValue()} serial={serial} />
+      return <DeviceStatusCell deviceState={getValue()} serial={serial} />
     },
   }),
   /* NOTE: OS & Hardware Group */
@@ -407,7 +407,7 @@ export const DEVICE_COLUMNS = [
   ),
   columnHelper.accessor(
     (row) =>
-      row.statusChangedAt && row.bookedBefore
+      row.owner && row.statusChangedAt && row.bookedBefore && row.bookedBefore > 1
         ? dateToFormattedString({ value: getExpireTime(row.statusChangedAt, row.bookedBefore), needTime: true })
         : undefined,
     {

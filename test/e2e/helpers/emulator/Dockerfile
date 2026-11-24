@@ -1,4 +1,4 @@
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 # Настройки среды
 ENV ANDROID_SDK_ROOT=/opt/android-sdk
@@ -8,7 +8,7 @@ ENV PATH=${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/emulat
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openjdk-17-jdk \
     wget unzip curl \
-    libgl1-mesa-glx \
+    libgl1 \
     libpulse0 \
     libx11-6 \
     libxrender1 \
@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 \
     pulseaudio \
     libtcmalloc-minimal4 \
-    libgles2-mesa \
+    libgles2 \
     redir  \
     qemu-utils \
     iproute2 \

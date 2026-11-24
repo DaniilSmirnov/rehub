@@ -5,6 +5,7 @@ import { DevicesPage } from '@/components/views/devices-page'
 import { ControlPage } from '@/components/views/control-page'
 import { MainLayout } from '@/components/layouts/main-layout'
 import { SettingsPage } from '@/components/views/settings-page'
+import { WatchPage } from '@/components/views/watch-page'
 
 import {
   getMainRoute,
@@ -12,6 +13,7 @@ import {
   getControlRoute,
   getDevicesRoute,
   getSettingsRoute,
+  getWatchRoute,
 } from '@/constants/route-paths'
 
 import { ErrorBoundaryElement } from './error-boundary-element'
@@ -26,6 +28,13 @@ export const appRouter = createHashRouter(
             <Route element={<DevicesPage />} path={getMainRoute()} />
             <Route element={<DevicesPage />} path={getDevicesRoute()} />
             <Route element={<ControlPage />} path={getControlRoute(':serial')}>
+              <Route element={<ControlPage />} path='logs' />
+              <Route element={<ControlPage />} path='advanced' />
+              <Route element={<ControlPage />} path='file-explorer' />
+              <Route element={<ControlPage />} path='info' />
+            </Route>
+            <Route element={<WatchPage />} path={getWatchRoute(':serial')} />
+            <Route element={<ControlPage />} path='/silent-control/:provider/:serial'>
               <Route element={<ControlPage />} path='logs' />
               <Route element={<ControlPage />} path='advanced' />
               <Route element={<ControlPage />} path='file-explorer' />

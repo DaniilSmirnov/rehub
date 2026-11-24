@@ -10,8 +10,6 @@ import { GroupService } from './group-service'
 @injectable()
 @deviceConnectionRequired()
 export class BookingService {
-  bookedBeforeTime = ''
-
   constructor(
     @inject(CONTAINER_IDS.groupService) private groupService: GroupService,
     @inject(CONTAINER_IDS.deviceBySerialStore) private deviceBySerialStore: DeviceBySerialStore
@@ -22,28 +20,25 @@ export class BookingService {
   }
 
   async init(): Promise<void> {
-    const device = await this.deviceBySerialStore.fetch()
+    await this.deviceBySerialStore.fetch()
+  }
 
-    if (device.statusChangedAt) {
-      this.setTime(device.statusChangedAt, device.bookedBefore || 0)
-    }
+  get bookedBeforeTime(): string {
+    const device = this.deviceBySerialStore.deviceQueryResult().data
+
+    if (!device?.owner || !device.statusChangedAt || !device.bookedBefore || device.bookedBefore <= 1) return ''
+
+    const expireTime = new Date(device.statusChangedAt).getTime() + device.bookedBefore
+
+    return Number.isFinite(expireTime) ? new Date(expireTime).toISOString() : ''
   }
 
   async reBookDevice(): Promise<void> {
-    const { data: device } = await this.deviceBySerialStore.refetch()
+    const device = await this.deviceBySerialStore.fetch()
 
-    if (!device || !device.channel || !device.serial) return
+    if (!device?.serial) return
 
-    await this.groupService.invite(device.serial, device.channel, device.group)
-
-    if (device.statusChangedAt) {
-      this.setTime(device.statusChangedAt, device?.bookedBefore || 0)
-    }
-  }
-
-  setTime(statusChangedAt: string, bookedBefore: number): void {
-    const expireTime = new Date(new Date(statusChangedAt).getTime() + bookedBefore)
-
-    this.bookedBeforeTime = expireTime.toISOString()
+    await this.groupService.invite(device.serial, device.group)
+    await this.deviceBySerialStore.refetch()
   }
 }

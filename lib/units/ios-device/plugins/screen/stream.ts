@@ -8,18 +8,30 @@ import logger from '../../../../util/logger.js'
 import * as iosutil from '../util/iosutil.js'
 import solo from '../../../base-device/plugins/solo.js'
 import wdaClient from '../wda/client.js'
-import push from '../../../base-device/support/push.js'
+import transport from '../../../base-device/support/transport.js'
 import group from '../../../base-device/plugins/group.js'
 import {NoGroupError} from '../../../../util/grouputil.js'
 import {decode} from '../../../../util/jwtutil.js'
+import {screenRole} from '../../../../util/watchutil.js'
 export default syrup.serial()
     .dependency(solo)
     .dependency(wdaClient)
-    .dependency(push)
+    .dependency(transport)
     .dependency(group)
-    .define(function(options, solo, WdaClient, push, group) {
+    .define(function(options, solo, WdaClient, transport, group) {
         const log = logger.createLogger('device:plugins:screen:stream')
         const wss = new webSocketServer.Server({port: options.screenPort})
+        // Viewers watch one automation lease; any change of owner ends it for them
+        const watchers = new Set()
+        const endWatching = () => {
+            for (const client of watchers) client.close(1008, 'Automation finished')
+            watchers.clear()
+        }
+        group.on('join', endWatching)
+        group.on('leave', endWatching)
+        if (options.silent) group.on('leave', () => {
+            for (const client of wss.clients) client.close(1008, 'Device session ended')
+        })
         const url = iosutil.getUri(options.wdaHost, options.mjpegPort)
 
         wss.on('connection', async(ws, req) => {
@@ -42,8 +54,9 @@ export default syrup.serial()
                 try {
                     await new Promise(r => setTimeout(r, 200))
 
-                    const deviceGroup = await group.get()
-                    if (deviceGroup.email !== user?.email) {
+                    await group.get()
+                    const role = screenRole(user, options.serial, group.lease())
+                    if (!role) {
                         const err = 'Device used by another user'
                         log.warn('WebSocket authentication failed for device %s: $s', options.serial, err)
                         ws.send(JSON.stringify({
@@ -55,7 +68,11 @@ export default syrup.serial()
                     }
 
                     authed = true
-                    log.info('WebSocket authenticated for device %s', options.serial)
+                    if (role === 'watcher') {
+                        watchers.add(ws)
+                        ws.on('close', () => watchers.delete(ws))
+                    }
+                    log.info('WebSocket authenticated for device %s as %s', options.serial, role)
 
                     // Send success message
                     ws.send(JSON.stringify({
@@ -79,6 +96,7 @@ export default syrup.serial()
             }
 
             await tryCheckDeviceGroup()
+            if (!authed || ws.readyState !== ws.OPEN) return
 
             const stream = new Writable({
                 write(chunk, encoding, callback) {
@@ -106,8 +124,9 @@ export default syrup.serial()
             const handleRequestStream = () => {
                 return new Promise((resolve, reject) => {
                     setTimeout(() => {
+                        if (!isConnectionAlive) { reject(); return }
                         if (frameStream !== null) {
-                            frameStream.req.end()
+                            frameStream?.req?.end()
                         }
                         frameStream = request.get(url)
                         frameStream.on('response', response => {
@@ -135,7 +154,7 @@ export default syrup.serial()
                         if (result) {
                             result.response.pipe(consumer).pipe(stream)
                             // [VD] We can't launch homeBtn otherwise opening in STF corrupt test automation run. Also no sense to execute connect
-                            await WdaClient.startSession()
+                            if (!options.silent) await WdaClient.startSession()
                             // WdaClient.homeBtn() //no existing session detected so we can press home button to wake up device automatically
                             // override already existing error handler
                             result.frameStream.on('error', function(err) {
@@ -147,25 +166,31 @@ export default syrup.serial()
 
             consumer.on('error', (err) => {
                 handleSocketError(err, 'Consumer error')
-                frameStream.req.end()
+                frameStream?.req?.end()
                 // doConnectionToMJPEGStream(fn)
             })
             stream.on('error', () => {
                 // handleSocketError(err, 'Stream error ')
-                frameStream.req.end()
+                frameStream?.req?.end()
             })
             stream.socket.on('error', () => {
                 // handleSocketError(err, 'Websocket stream error ')
-                frameStream.req.end()
+                frameStream?.req?.end()
             })
             ws.on('close', async() => {
+                if (options.silent) {
+                    isConnectionAlive = false
+                    frameStream?.abort()
+                    stream.destroy()
+                    return
+                }
                 // @TODO handle close event
                 // stream.socket.onclose()
                 if (!authed) {
                     return
                 }
 
-                frameStream.req.end()
+                frameStream?.req?.end()
                 const orientation = WdaClient.orientation
 
                 const stoppingSession = async() => {
@@ -186,6 +211,12 @@ export default syrup.serial()
                 stoppingSession()
             })
             ws.on('error', async() => {
+                if (options.silent) {
+                    isConnectionAlive = false
+                    frameStream?.abort()
+                    stream.destroy()
+                    return
+                }
                 // @TODO handle error event
                 // stream.socket.onclose()
                 if (!authed) {

@@ -39,7 +39,8 @@ export async function generateAdminToken() {
 
     let respToken = await tokenResponse.json()
 
-    const token = respToken.token
+    // The API returns the token object ({id, title, jwt, ...}); the bearer value is its jwt
+    const token = respToken.token.jwt
     console.log('Using token =', token.toString().trim())
     return token
 }

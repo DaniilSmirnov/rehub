@@ -10,7 +10,7 @@ export class DeviceHubMainPage {
 
     constructor(page: Page) {
         this.page = page;
-        this.devicehubLogo = page.getByTitle('DeviceHub');
+        this.devicehubLogo = page.getByTitle('reHub');
         this.pageHeader = new PageHeader(this.page)
     }
 

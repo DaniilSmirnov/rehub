@@ -1,0 +1,6 @@
+<svg width="300" height="100" viewBox="0 0 300 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="300" height="100" rx="12" fill="white" />
+    <text x="8" y="70" font-family="Helvetica, Arial, sans-serif" font-size="60" font-weight="700" fill="#1A1A1A">re</text>
+    <rect x="96" y="20" width="150" height="60" rx="14" fill="#FF8C00" />
+    <text x="111" y="70" font-family="Helvetica, Arial, sans-serif" font-size="60" font-weight="700" fill="white">Hub</text>
+</svg>

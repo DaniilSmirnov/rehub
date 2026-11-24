@@ -1,6 +1,7 @@
+import os from 'os'
 import syrup from '@devicefarmer/stf-syrup'
 import lifecycle from '../../util/lifecycle.js'
-import logger$0 from '../base-device/support/logger.js'
+import logger from '../../util/logger.js'
 import heartbeat from '../base-device/plugins/heartbeat.js'
 import solo from './plugins/solo.js'
 import stream from './plugins/screen/stream.js'
@@ -15,7 +16,7 @@ import mute from './plugins/mute.js'
 import shell from './plugins/shell.js'
 import touch from './plugins/touch/index.js'
 import install from './plugins/install.js'
-import forward from './plugins/forward/index.js'
+
 import group from './plugins/group.js'
 import cleanup from './plugins/cleanup.js'
 import reboot from './plugins/reboot.js'
@@ -30,52 +31,73 @@ import mobileService from './plugins/mobile-service.js'
 import remotedebug from './plugins/remotedebug.js'
 import {trackModuleReadyness} from './readyness.js'
 import wireutil from '../../wire/util.js'
-import push from '../base-device/support/push.js'
+import transport from '../base-device/support/transport.js'
 import adb from './support/adb.js'
 import router from '../base-device/support/router.js'
-import {DeviceIntroductionMessage, DeviceRegisteredMessage, ProviderMessage} from "../../wire/wire.js";
+import {
+    DeviceAbsentMessage,
+    DeviceIntroductionMessage,
+    DeviceRegisteredMessage,
+    ProviderMessage
+} from "../../wire/wire.js";
 
 export default (function(options: any) {
     return syrup.serial()
-        // We want to send logs before anything else starts happening
-        .dependency(logger$0)
-        .dependency(push)
+        .dependency(transport)
         .dependency(adb)
         .dependency(router)
         .dependency(trackModuleReadyness('solo', solo))
-        .define(async(options, logger, push, adb, router, solo) => {
+        .define(async(options, transport, adb, router, solo) => {
+            logger.setGlobalIdentifier(options.serial)
             const log = logger.createLogger('device')
             log.info('Preparing device')
 
-            if (!options.provider) {
-                let listener: ((...args: any[]) => void) | null = null
-                const waitRegister = Promise.race([
-                    new Promise(resolve =>
-                        router.on(DeviceRegisteredMessage, listener = (...args: any[]) => resolve(args))
-                    ),
-                    new Promise(r => setTimeout(r, 15000))
-                ])
+            // Every device self-registers over its own DEALER.
+            // The DEALER's routing identity is deviceKey(providerName, serial),
+            // which is what the processor uses to derive presence.
+            const providerName = options.provider ?? os.hostname()
+            const type = await adb.getDevice(options.serial).getState()
 
-                const type = await adb.getDevice(options.serial).getState()
-                push?.send([
+            let registerListener: ((...args: any[]) => void) | null = null
+            const waitRegister = Promise.race([
+                new Promise(resolve =>
+                    router.on(DeviceRegisteredMessage, registerListener = (...args: any[]) => resolve(args))
+                ),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(`Registration for device ${options.serial} failed`), 15000))
+            ])
+
+            transport?.send([
+                wireutil.global,
+                wireutil.pack(DeviceIntroductionMessage, {
+                    serial: options.serial,
+                    // @ts-ignore
+                    status: wireutil.toDeviceStatus(type),
+                    provider: ProviderMessage.create({
+                        channel: solo.channel,
+                        name: providerName
+                    }),
+                    silent: options.silent,
+                    groupId: options.groupId
+                })
+            ])
+
+            await waitRegister
+            router.removeListener(DeviceRegisteredMessage, registerListener!)
+            registerListener = null
+
+            lifecycle.observeFatal(() => {
+                transport.send([
                     wireutil.global,
-                    wireutil.pack(DeviceIntroductionMessage, {
+                    wireutil.pack(DeviceAbsentMessage, {
                         serial: options.serial,
-                        // @ts-ignore
-                        status: wireutil.toDeviceStatus(type),
-                        provider: {
-                            channel: solo.channel,
-                            name: `standalone-${options.serial}`
-                        }
+                        presenceChangedAt: Date.now()
                     })
                 ])
-
-                await waitRegister
-                router.removeListener(DeviceRegisteredMessage, listener!)
-                listener = null
-            }
+            })
 
             return syrup.serial()
+                .dependency(trackModuleReadyness('group', group))
                 .dependency(trackModuleReadyness('heartbeat', heartbeat))
                 .dependency(trackModuleReadyness('stream', stream))
                 .dependency(trackModuleReadyness('capture', capture))
@@ -89,8 +111,6 @@ export default (function(options: any) {
                 .dependency(trackModuleReadyness('shell', shell))
                 .dependency(trackModuleReadyness('touch', touch))
                 .dependency(trackModuleReadyness('install', install))
-                .dependency(trackModuleReadyness('forward', forward))
-                .dependency(trackModuleReadyness('group', group))
                 .dependency(trackModuleReadyness('cleanup', cleanup))
                 .dependency(trackModuleReadyness('reboot', reboot))
                 .dependency(trackModuleReadyness('connect', connect))
@@ -102,10 +122,42 @@ export default (function(options: any) {
                 .dependency(trackModuleReadyness('filesystem', filesystem))
                 .dependency(trackModuleReadyness('mobileService', mobileService))
                 .dependency(trackModuleReadyness('remotedebug', remotedebug))
-                .define((options, heartbeat) => {
+                .define((options, group, _heartbeat, _stream, _capture, service) => {
+                    // The screen was woken up to start the service. An idle device keeps
+                    // it off, as after a release; joining wakes it up again
+                    group.get().catch(() => {
+                        service.sendCommand('settings put system screen_brightness_mode 0')
+                        service.sendCommand('settings put system screen_brightness 0')
+                        service.sendCommand('input keyevent 223') // KEYCODE_SLEEP
+                    })
+
                     if (process.send) {
                         // Only if we have a parent process
                         process.send('ready')
+
+                        /*
+                         * Tell the provider whether the device is rented out.
+                         * The provider pauses ADB health checks and idle
+                         * reconnects while a device is busy, so it never
+                         * interferes with an active session.
+                         */
+                        const reportState = (state: 'busy' | 'idle', email?: string, reason?: string) => {
+                            try {
+                                process.send?.({
+                                    type: 'device-state',
+                                    serial: options.serial,
+                                    state,
+                                    email,
+                                    reason
+                                })
+                            }
+                            catch (err: any) {
+                                log.warn('Failed to report "%s" state: %s', state, err?.message)
+                            }
+                        }
+
+                        group.on('join', e => reportState('busy', e.owner.email))
+                        group.on('leave', (owner, reason) => reportState('idle', owner.email, reason))
                     }
                     log.info('Fully operational')
                     return solo.poke()
@@ -114,9 +166,9 @@ export default (function(options: any) {
         })
         .consume(options)
         .catch((err) => {
-            if (err.stack.includes('no service started')) {
+            if (err.stack?.includes('no service started')) {
                 return lifecycle.graceful(err.stack)
             }
-            lifecycle.fatal(`Setup had an error ${err.stack}`)
+            lifecycle.fatal(`Setup had an error ${err.stack || err.message}`)
         })
 })

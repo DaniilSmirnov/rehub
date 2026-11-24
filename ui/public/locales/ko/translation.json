@@ -1,6 +1,6 @@
 {
   "-": "-",
-  "A new version of STF is available": "새 버전의 VK Devicehub를 사용 가능 합니다",
+  "A new version of STF is available": "새 버전의 reHub를 사용 가능 합니다",
   "A package is already installed with the same name.": "동일한 패키지가 설치되어 있습니다.",
   "A previously installed package of the same name has a different signature than the new package (and the old package's data was not removed).": "이전에 설치된 패키지와 새로운 패키지의 서명이 다릅니다(또한 이전에 설치된 패키지 데이터가 삭제되지 않았습니다).",
   "AC": "AC",
@@ -12,7 +12,7 @@
   "ADB Keys": "ADB 키",
   "Add": "추가",
   "Add ADB Key": "ADB 키 추가",
-  "Add the following ADB Key to STF?": "다음 ADB 키를 VKDevicehub에 추가 하시겠습니까?",
+  "Add the following ADB Key to STF?": "다음 ADB 키를 reHub에 추가 하시겠습니까?",
   "Admin mode has been disabled.": "관리자 모드가 비활성화 되었습니다.",
   "Admin mode has been enabled.": "관리자 모드가 활성화 되었습니다.",
   "Advanced": "고급",

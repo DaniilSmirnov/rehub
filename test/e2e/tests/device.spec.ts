@@ -21,10 +21,10 @@ test.describe('Device control tests', () => {
 
     test('Device screen changing when swiping', async ({ page }) => {
         let devicePage = new DeviceHubDevicePage(page, deviceSerial)
+        await devicePage.deviceScreen.waitForFirstFrame()
         const firstScreen = await devicePage.deviceScreen.getDeviceScreen()
         await devicePage.deviceScreen.swipeOnDeviceScreen()
-        const secondScreen = await devicePage.deviceScreen.getDeviceScreen()
-        expect(firstScreen).not.toBe(secondScreen)
+        await expect.poll(() => devicePage.deviceScreen.getDeviceScreen(), { timeout: 15000 }).not.toBe(firstScreen)
     })
 
     test('Free device by button', async ({ page }) => {
@@ -48,6 +48,11 @@ test.describe('Device control tests', () => {
 
 
 test.describe('Device already used tests', () => {
+    // The device is taken by the admin: give it back, or the next tests find it busy
+    test.afterEach('Free device after test (via api)', async() => {
+        await freeDevice(deviceSerial)
+    })
+
     test('Try to use already used device by direct url', async ({ page }) => {
         await useDevice(deviceSerial)
         const modalHeader = 'Device was disconnected'

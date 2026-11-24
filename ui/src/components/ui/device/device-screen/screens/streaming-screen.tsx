@@ -39,7 +39,7 @@ export const StreamingScreen = observer(({ canvasWrapperRef }: ScreenProps) => {
       eventTimestamp: event.timeStamp,
       isAltKeyPressed: event.altKey,
       isRightButtonPressed: event.button === 2,
-      focusInput: () => inputRef.current?.focus(),
+      focusInput: () => inputRef.current?.focus({ preventScroll: true }),
     })
   })
 
@@ -129,12 +129,23 @@ export const StreamingScreen = observer(({ canvasWrapperRef }: ScreenProps) => {
   })
 
   useEffect(() => {
-    canvasWrapperRef?.current?.addEventListener('mousedown', onMouseDown)
-    canvasWrapperRef?.current?.addEventListener('mousemove', onMouseMove)
-    canvasWrapperRef?.current?.addEventListener('mouseup', onMouseUp)
-    canvasWrapperRef?.current?.addEventListener('touchend', onTouchEnd)
-    canvasWrapperRef?.current?.addEventListener('touchmove', onTouchMove)
-    canvasWrapperRef?.current?.addEventListener('touchstart', onTouchStart)
+    const wrapper = canvasWrapperRef.current
+
+    wrapper?.addEventListener('mousedown', onMouseDown)
+    wrapper?.addEventListener('mousemove', onMouseMove)
+    wrapper?.addEventListener('mouseup', onMouseUp)
+    wrapper?.addEventListener('touchend', onTouchEnd)
+    wrapper?.addEventListener('touchmove', onTouchMove)
+    wrapper?.addEventListener('touchstart', onTouchStart)
+
+    return () => {
+      wrapper?.removeEventListener('mousedown', onMouseDown)
+      wrapper?.removeEventListener('mousemove', onMouseMove)
+      wrapper?.removeEventListener('mouseup', onMouseUp)
+      wrapper?.removeEventListener('touchend', onTouchEnd)
+      wrapper?.removeEventListener('touchmove', onTouchMove)
+      wrapper?.removeEventListener('touchstart', onTouchStart)
+    }
   }, [])
 
   return (

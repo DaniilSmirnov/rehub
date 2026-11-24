@@ -180,6 +180,15 @@ export const getDeviceBySerial = async (serial: string, params?: GetDeviceBySeri
   return data.device
 }
 
+/* A short-lived token that opens the screen of a device under automation read-only */
+export const getDeviceWatchToken = async (serial: string): Promise<string> => {
+  const { data } = await openstfApiClient.get<{ token: string }>(
+    `${OPENSTF_API_ROUTES.devices}/${encodeURIComponent(serial)}/watch`
+  )
+
+  return data.token
+}
+
 export const getCurrentUserProfile = async (): Promise<User | undefined> => {
   const { data } = await openstfApiClient.get<UserResponse>(OPENSTF_API_ROUTES.user)
 

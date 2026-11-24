@@ -1,5 +1,17 @@
 .screenQualitySelector {
+  right: 0;
   padding: 15px 15px 10px;
+}
+
+.qualityRange {
+  display: block;
+
+  box-sizing: border-box;
+  width: min(250px, calc(100vw - 48px));
+  max-width: 100%;
+  margin: 0;
+
+  accent-color: var(--vkui--color_accent_azure);
 }
 
 .qualityButton {

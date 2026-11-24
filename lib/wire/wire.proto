@@ -11,6 +11,64 @@ message Envelope {
   // required MessageType type = 1;
   required google.protobuf.Any message = 2;
   optional string channel = 3;
+  optional SilentEventContext silentEvent = 4;
+  optional SilentCommandContext silentCommand = 5;
+}
+
+message SilentEventContext {
+  required string instanceId = 1;
+  required uint32 sequence = 2;
+  optional string leaseId = 3;
+}
+
+message SilentCommandContext {
+  required string instanceId = 1;
+  required string leaseId = 2;
+}
+
+message SilentActor {
+  required string email = 1;
+  required string name = 2;
+  required string group = 3;
+  repeated string adbKeys = 4;
+  // Full keys in the ~/.android/adbkey.pub format, for the ones that have one stored
+  repeated string adbPublicKeys = 5;
+}
+
+message DescribeSilentDevice {
+  required SilentActor actor = 1;
+}
+
+message AcquireSilentDevice {
+  required SilentActor actor = 1;
+  required string instanceId = 2;
+}
+
+message ReleaseSilentDevice {}
+
+// Snapshot contains only UI fields, never ACL, keys or lease credentials.
+message SilentDeviceSnapshot {
+  required string json = 1;
+}
+
+// Source is filled by processor from the ROUTER identity, not worker payload.
+message SilentDeviceEvent {
+  required string providerName = 1;
+  required string serial = 2;
+  required SilentEventContext context = 3;
+  required google.protobuf.Any event = 4;
+}
+
+// A worker asks its processor for persisted remote-connect configuration.
+// Correlation is independent of app-side transaction reply paths.
+message ResolveAdbPortRequest {
+  required string requestId = 1;
+}
+
+message ResolveAdbPortResponse {
+  required string requestId = 1;
+  optional uint32 adbPort = 2;
+  optional string error = 3;
 }
 
 message UpdateAccessTokenMessage {
@@ -278,6 +336,8 @@ message DeviceIntroductionMessage {
   required DeviceStatus status = 2;
   required ProviderMessage provider = 3;
   optional string deviceType = 4;
+  optional bool silent = 5;
+  optional string groupId = 6;
 }
 
 message DeviceIosIntroductionMessage {
@@ -299,10 +359,12 @@ message DeviceRegisteredMessage {
 
 message DevicePresentMessage {
   required string serial = 1;
+  optional double presenceChangedAt = 2;
 }
 
 message DeviceAbsentMessage {
   required string serial = 1;
+  optional double presenceChangedAt = 2;
 }
 
 message DeviceReadyMessage {
@@ -430,6 +492,8 @@ message GroupMessage {
   repeated DeviceRequirement requirements = 3;
   optional string usage = 4;
   repeated string keys = 5;
+  // Full keys in the ~/.android/adbkey.pub format, for the ones that have one stored
+  repeated string publicKeys = 6;
 }
 
 message AutoGroupMessage {
@@ -462,6 +526,14 @@ message JoinGroupByVncAuthResponseMessage {
 }
 
 message AdbKeysUpdatedMessage {
+}
+
+// A device accepted the owner's key by its fingerprint: the full key, to store for next time
+message AdbPublicKeyMessage {
+  required string serial = 1;
+  required string email = 2;
+  required string fingerprint = 3;
+  required string publicKey = 4;
 }
 
 message VncAuthResponsesUpdatedMessage {

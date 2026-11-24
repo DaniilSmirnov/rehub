@@ -81,6 +81,13 @@ It routes incoming requests to the appropriate backend services based on URL pat
 The **processor** is a service that handles communication between the device side and the application side.
 It routes messages between these two sides using ZeroMQ sockets and processes various types of messages defined in the wire protocol.
 
+With `--auto-restore-owner` (`DH_PROCESSOR_AUTO_RESTORE_OWNER=true`, off by default) a device that disappears while
+someone is using it, for example to reboot, is kept for that user for two minutes. When its worker reports ready
+again, the processor joins it back to the same user with the same lease timeout, as long as the user is still a
+member of the device's group and nobody took the device in the meantime. While it is held the API reports the device
+as `claimed: true` and refuses to hand it to anyone else; the held-for user is never exposed. Set the flag the same
+way on every processor.
+
 ==============================
 ## provider
 The **provider** module is responsible for tracking and managing physical devices connected to the system.

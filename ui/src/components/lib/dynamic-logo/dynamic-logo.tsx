@@ -4,7 +4,7 @@ import { useColorScheme } from '@vkontakte/vkui'
 
 import { ConditionalRender } from '@/components/lib/conditional-render'
 
-import DeviceHubIcon from '@/assets/device-hub.svg?react'
+import ReHubIcon from '@/assets/re-hub.svg?react'
 import EmulatorHubIcon from '@/assets/emulator-hub.svg?react'
 
 import styles from './dynamic-logo.module.css'
@@ -13,19 +13,19 @@ type DynamicLogoProps = {
   width?: number
   height?: number
   className?: string
-  logoType?: 'deviceHub' | 'emulatorHub'
+  logoType?: 'reHub' | 'emulatorHub'
 }
 
-export const DynamicLogo = memo(({ width, height, className, logoType = 'deviceHub' }: DynamicLogoProps) => {
+export const DynamicLogo = memo(({ width, height, className, logoType = 'reHub' }: DynamicLogoProps) => {
   const colorScheme = useColorScheme()
 
   return (
     <>
-      <ConditionalRender conditions={[logoType === 'deviceHub']}>
-        <DeviceHubIcon
+      <ConditionalRender conditions={[logoType === 'reHub']}>
+        <ReHubIcon
           className={cn(className, { [styles.darkLogo]: colorScheme === 'dark' })}
           height={height}
-          title='DeviceHub'
+          title='reHub'
           width={width}
         />
       </ConditionalRender>

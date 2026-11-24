@@ -1,5 +1,5 @@
 # -------- BUILDER --------
-FROM --platform=linux/amd64 node:20.19.0-bullseye-slim AS builder
+FROM --platform=linux/amd64 node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -13,8 +13,11 @@ COPY . .
 RUN npm ci --python="/usr/bin/python3" --loglevel http && \
     npm prune --production
 
+# Server of the scrcpy screen stream (--need-scrcpy), checked against its SHA-256
+RUN node scripts/fetch-scrcpy-server.mjs
+
 # -------- RUNTIME --------
-FROM --platform=linux/amd64 node:20.19.0-bullseye-slim
+FROM --platform=linux/amd64 node:20-bookworm-slim
 
 LABEL org.opencontainers.image.source=https://github.com/VKCOM/devicehub
 LABEL org.opencontainers.image.title=DeviceHub
